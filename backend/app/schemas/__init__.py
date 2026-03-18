@@ -43,12 +43,14 @@ from app.schemas.system import (
     HealthCheckResponse,
     RuntimeSettingRead,
 )
+from app.schemas.workspace import CaseContextResponse
 
 __all__ = [
     "AgentLogEvent",
     "AppealNodeRead",
     "BackgroundTaskRunRead",
     "CaseContextRead",
+    "CaseContextResponse",
     "CitationResolvedEvent",
     "CitationEdgeRead",
     "CompleteEvent",
