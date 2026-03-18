@@ -1,3 +1,9 @@
+from app.rag.appeal import (
+    AppealSeverity,
+    AppealValidationResult,
+    AppealValidationStatus,
+    AppealValidator,
+)
 from app.rag.crag import (
     CorrectiveRAGPipeline,
     CRAGAction,
@@ -8,6 +14,14 @@ from app.rag.crag import (
     TemporalValidationResult,
     WebSupplement,
     WebSupplementProvider,
+)
+from app.rag.generator import (
+    GeneratedAnswerDraft,
+    GeneratedPlaceholder,
+    GeneratedSection,
+    PlaceholderKind,
+    PlaceholderOnlyGenerator,
+    PlaceholderPromptContract,
 )
 from app.rag.graph import (
     ConceptAnchorFinder,
@@ -42,13 +56,49 @@ from app.rag.lexical import (
     LexicalCorpusBuilder,
     LexicalRetriever,
 )
+from app.rag.misgrounding import (
+    DeterministicEntailmentClassifier,
+    EntailmentLabel,
+    MisgroundingAction,
+    MisgroundingChecker,
+    MisgroundingResult,
+    MisgroundingStatus,
+    PassageCandidate,
+)
+from app.rag.resolution import (
+    CitationResolutionStatus,
+    CitationResolver,
+    ResolvedAnswerDraft,
+    ResolvedPlaceholder,
+)
 from app.rag.router import QueryRouter
+from app.rag.self_rag import (
+    ExtractedClaim,
+    SelfRAGClaimResult,
+    SelfRAGClaimStatus,
+    SelfRAGVerificationResult,
+    SelfRAGVerifier,
+)
+from app.rag.structured_answer import (
+    CitationBadgeStatus,
+    InlineCitationBadge,
+    StructuredAnswer,
+    StructuredAnswerBuilder,
+    StructuredAnswerSection,
+    StructuredAnswerSectionKind,
+    StructuredClaim,
+    VerificationStatusItem,
+)
 
 __all__ = [
     "BM25Index",
     "CRAGAction",
     "CRAGResult",
     "CRAGValidator",
+    "AppealSeverity",
+    "AppealValidationResult",
+    "AppealValidationStatus",
+    "AppealValidator",
     "AuthorityRanker",
     "ConceptAnchorFinder",
     "CorrectiveRAGPipeline",
@@ -59,6 +109,9 @@ __all__ = [
     "ExpandedQuery",
     "GraphRAGPipeline",
     "GraphSearchResult",
+    "GeneratedAnswerDraft",
+    "GeneratedPlaceholder",
+    "GeneratedSection",
     "HypotheticalDraft",
     "HypotheticalGenerator",
     "HyDEPipeline",
@@ -73,11 +126,38 @@ __all__ = [
     "LegalTokenizer",
     "LexicalCorpusBuilder",
     "LexicalRetriever",
+    "DeterministicEntailmentClassifier",
+    "EntailmentLabel",
+    "MisgroundingAction",
+    "MisgroundingChecker",
+    "MisgroundingResult",
+    "MisgroundingStatus",
+    "PassageCandidate",
     "NullWebSupplementProvider",
+    "CitationResolutionStatus",
+    "CitationResolver",
+    "PlaceholderKind",
+    "PlaceholderOnlyGenerator",
+    "PlaceholderPromptContract",
     "QueryRouter",
     "ReciprocalRankFusion",
+    "ResolvedAnswerDraft",
+    "ResolvedPlaceholder",
+    "ExtractedClaim",
+    "SelfRAGClaimResult",
+    "SelfRAGClaimStatus",
+    "SelfRAGVerificationResult",
+    "SelfRAGVerifier",
+    "CitationBadgeStatus",
+    "InlineCitationBadge",
+    "StructuredAnswer",
+    "StructuredAnswerBuilder",
+    "StructuredAnswerSection",
+    "StructuredAnswerSectionKind",
+    "StructuredClaim",
     "TemporalSeverity",
     "TemporalValidationResult",
+    "VerificationStatusItem",
     "WebSupplement",
     "WebSupplementProvider",
 ]
