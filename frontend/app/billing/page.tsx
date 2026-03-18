@@ -11,16 +11,17 @@ import {
   resolveFrontendAuthSession,
 } from "../../lib/auth-session";
 import {
-  demoBillingInvoicesForSession,
-  demoBillingSummaryForSession,
-  pricingTiers,
+  getBillingPageData,
 } from "../../lib/billing";
 
-export default function BillingPage() {
+export default async function BillingPage() {
   const authSession = resolveFrontendAuthSession();
   const authHeaders = buildFrontendAuthHeaders(authSession);
-  const billingSummary = demoBillingSummaryForSession(authSession);
-  const invoices = demoBillingInvoicesForSession(authSession);
+  const { apiBaseUrl, billingSummary, invoices, pricingTiers, source } =
+    await getBillingPageData({
+      authHeaders,
+      authSession,
+    });
 
   return (
     <main className="min-h-screen text-ink-900">
@@ -65,8 +66,14 @@ export default function BillingPage() {
                   {billingSummary.currentPlanName}
                 </h2>
               </div>
-              <CitationBadge tone="binding">
-                {authSession.isAuthenticated ? "Authenticated" : "Anonymous"}
+              <CitationBadge
+                tone={source === "live" ? "verified" : "uncertain"}
+              >
+                {source === "live"
+                  ? authSession.isAuthenticated
+                    ? "Live authenticated billing"
+                    : "Live public catalog"
+                  : "Preview fallback"}
               </CitationBadge>
             </div>
 
@@ -99,15 +106,40 @@ export default function BillingPage() {
                 tone="ink"
                 value={Object.keys(authHeaders).length > 0 ? "Headers ready" : "No auth headers"}
               />
+              <MetricPill
+                className="w-full"
+                label="Queries left today"
+                tone="teal"
+                value={
+                  billingSummary.queriesRemainingToday !== null
+                    ? String(billingSummary.queriesRemainingToday)
+                    : "Unlimited"
+                }
+              />
+              <MetricPill
+                className="w-full"
+                label="Next invoice"
+                tone="brass"
+                value={billingSummary.nextInvoiceDate ?? "Not scheduled"}
+              />
             </div>
 
             <div className="mt-5 rounded-[1.2rem] border border-[rgba(244,236,221,0.12)] bg-[rgba(252,247,239,0.06)] p-4">
               <p className="font-mono text-xs uppercase tracking-[0.2em] text-[rgba(244,236,221,0.6)]">
-                Razorpay hook
+                Backend routes
               </p>
               <p className="mt-3 text-sm leading-7 text-[rgba(252,247,239,0.82)]">
-                Checkout sessions are now generated through the backend billing
-                route, and paid plans unlock workspace-scoped research.
+                {apiBaseUrl}
+                /api/billing/plans
+              </p>
+              <p className="mt-2 text-sm leading-7 text-[rgba(252,247,239,0.82)]">
+                {apiBaseUrl}
+                /api/billing/subscription
+              </p>
+              <p className="mt-3 text-sm leading-7 text-[rgba(252,247,239,0.72)]">
+                Razorpay-backed plan enforcement now reads from the live backend
+                contract when available and falls back only when billing routes
+                are unavailable.
               </p>
             </div>
           </SurfaceCard>

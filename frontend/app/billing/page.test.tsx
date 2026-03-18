@@ -3,8 +3,8 @@ import { render, screen } from "@testing-library/react";
 import BillingPage from "./page";
 
 describe("BillingPage", () => {
-  it("renders the billing plan, catalog, and invoice history surfaces", () => {
-    render(<BillingPage />);
+  it("renders the billing plan, catalog, and invoice history surfaces", async () => {
+    render(await BillingPage());
 
     expect(
       screen.getByRole("heading", {
@@ -21,6 +21,7 @@ describe("BillingPage", () => {
     expect(
       screen.getAllByText(/Advocate Pro monthly subscription/i),
     ).toHaveLength(2);
+    expect(screen.getByText(/Preview fallback/i)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Back to landing page/i })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Open workspace/i })).toBeInTheDocument();
   });
