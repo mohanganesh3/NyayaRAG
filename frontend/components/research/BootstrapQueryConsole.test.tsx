@@ -44,7 +44,16 @@ describe("BootstrapQueryConsole", () => {
   });
 
   it("consumes and renders streamed query events", async () => {
-    render(<BootstrapQueryConsole />);
+    const { container } = render(
+      <BootstrapQueryConsole
+        defaultQuery="What are the strongest anticipatory bail arguments?"
+        showQueryInput
+        suggestedQueries={[
+          "What are the strongest anticipatory bail arguments?",
+          "Which Supreme Court case should lead the note?",
+        ]}
+      />,
+    );
 
     fireEvent.click(screen.getByRole("button", { name: /Run Stream Demo/i }));
 
@@ -70,7 +79,18 @@ describe("BootstrapQueryConsole", () => {
           data: JSON.stringify({
             type: "TOKEN",
             token: "NyayaRAG bootstrap stream ready.",
-            sequence: 2,
+            sequence: 3,
+            emitted_at: "2026-03-16T00:00:01Z",
+          }),
+        }),
+      );
+      source.onmessage?.(
+        new MessageEvent("message", {
+          data: JSON.stringify({
+            type: "AGENT_LOG",
+            agent: "QueryAnalyzer",
+            message: "Detected hybrid_rag route.",
+            sequence: 4,
             emitted_at: "2026-03-16T00:00:01Z",
           }),
         }),
@@ -79,7 +99,7 @@ describe("BootstrapQueryConsole", () => {
         new MessageEvent("message", {
           data: JSON.stringify({
             type: "COMPLETE",
-            sequence: 3,
+            sequence: 5,
             emitted_at: "2026-03-16T00:00:02Z",
             confidence: 1,
             metrics: { mode: "dummy" },
@@ -94,6 +114,13 @@ describe("BootstrapQueryConsole", () => {
         screen.getByText(/NyayaRAG bootstrap stream ready\./i),
       ).toBeInTheDocument();
       expect(screen.getByText("1.00")).toBeInTheDocument();
+      expect(screen.getByText(/Detected hybrid_rag route\./i)).toBeInTheDocument();
     });
+
+    const stepTitles = Array.from(
+      container.querySelectorAll(".process-step-title"),
+    ).map((element) => element.textContent);
+    expect(stepTitles[0]).toContain("Connecting to backend...");
+    expect(stepTitles[1]).toContain("Analyzing query...");
   });
 });

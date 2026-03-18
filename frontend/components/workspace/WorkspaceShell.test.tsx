@@ -10,6 +10,7 @@ describe("WorkspaceShell", () => {
     expect(screen.getByText(/Arjun Rao v\. State of Karnataka/i)).toBeInTheDocument();
     expect(screen.getByText(/Criminal Petition No\. 4812\/2026/i)).toBeInTheDocument();
     expect(screen.getByText(/Uploaded documents/i)).toBeInTheDocument();
+    expect(screen.getByText(/Live research display/i)).toBeInTheDocument();
     expect(
       screen.getByText(/Siddharam Satlingappa Mhetre v State of Maharashtra/i),
     ).toBeInTheDocument();

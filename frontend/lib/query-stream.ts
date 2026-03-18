@@ -72,6 +72,12 @@ export type QueryAcceptedResponse = {
   };
 };
 
+export type QueryStreamStep = {
+  name: string;
+  status: "running" | "completed" | "error";
+  detail?: string;
+};
+
 export type ErrorResponse = {
   success: false;
   error: {
@@ -82,15 +88,21 @@ export type ErrorResponse = {
 };
 
 export type QueryStreamState = {
-  steps: Array<{
-    name: string;
-    status: "running" | "completed" | "error";
-    detail?: string;
-  }>;
+  steps: QueryStreamStep[];
   output: string;
   status: "idle" | "connecting" | "streaming" | "complete" | "error";
   errorMessage: string | null;
   confidence: number | null;
+  agentLogs: Array<{
+    agent: string;
+    message: string;
+  }>;
+  citationResolutions: Array<{
+    citation: string;
+    placeholder: string;
+    status: string;
+  }>;
+  metrics: Record<string, unknown> | null;
 };
 
 export function createInitialQueryStreamState(): QueryStreamState {
@@ -100,13 +112,78 @@ export function createInitialQueryStreamState(): QueryStreamState {
     status: "idle",
     errorMessage: null,
     confidence: null,
+    agentLogs: [],
+    citationResolutions: [],
+    metrics: null,
   };
+}
+
+export type QueryStreamAction = QueryStreamEvent | { type: "RESET" };
+
+function buildStepDetail(
+  stepName: string,
+  data: Record<string, unknown> | null | undefined,
+  matchedName?: string,
+): string | undefined {
+  const fragments: string[] = [];
+
+  if (matchedName && matchedName !== stepName) {
+    fragments.push(stepName);
+  }
+
+  if (data && Object.keys(data).length > 0) {
+    fragments.push(JSON.stringify(data));
+  }
+
+  return fragments.length > 0 ? fragments.join(" · ") : undefined;
+}
+
+function updateStepState(
+  steps: QueryStreamStep[],
+  eventStep: string,
+  status: QueryStreamStep["status"],
+  detail?: string,
+): QueryStreamStep[] {
+  const exactIndex = [...steps]
+    .map((step, index) => ({ index, step }))
+    .reverse()
+    .find(({ step }) => step.name === eventStep)?.index;
+
+  if (exactIndex !== undefined) {
+    return steps.map((step, index) =>
+      index === exactIndex ? { ...step, status, detail } : step,
+    );
+  }
+
+  const runningIndex = [...steps]
+    .map((step, index) => ({ index, step }))
+    .reverse()
+    .find(({ step }) => step.status === "running")?.index;
+
+  if (runningIndex !== undefined) {
+    const runningStep = steps[runningIndex];
+    return steps.map((step, index) =>
+      index === runningIndex
+        ? {
+            ...step,
+            status,
+            detail: buildStepDetail(eventStep, undefined, runningStep.name) ?? detail,
+          }
+        : step,
+    );
+  }
+
+  return [...steps, { name: eventStep, status, detail }];
 }
 
 export function applyQueryStreamEvent(
   state: QueryStreamState,
-  event: QueryStreamEvent,
+  event: QueryStreamAction,
 ): QueryStreamState {
+  if (event.type === "RESET") {
+    return createInitialQueryStreamState();
+  }
+
   switch (event.type) {
     case "STEP_START":
       return {
@@ -118,14 +195,11 @@ export function applyQueryStreamEvent(
       return {
         ...state,
         status: "streaming",
-        steps: state.steps.map((step) =>
-          step.name === event.step
-            ? {
-                ...step,
-                status: "completed",
-                detail: event.data ? JSON.stringify(event.data) : undefined,
-              }
-            : step,
+        steps: updateStepState(
+          state.steps,
+          event.step,
+          "completed",
+          buildStepDetail(event.step, event.data),
         ),
       };
     case "STEP_ERROR":
@@ -133,11 +207,18 @@ export function applyQueryStreamEvent(
         ...state,
         status: "error",
         errorMessage: event.error,
-        steps: state.steps.map((step) =>
-          step.name === event.step
-            ? { ...step, status: "error", detail: event.error }
-            : step,
-        ),
+        steps: updateStepState(state.steps, event.step, "error", event.error),
+      };
+    case "AGENT_LOG":
+      return {
+        ...state,
+        agentLogs: [
+          ...state.agentLogs,
+          {
+            agent: event.agent,
+            message: event.message,
+          },
+        ],
       };
     case "TOKEN":
       return {
@@ -150,9 +231,21 @@ export function applyQueryStreamEvent(
         ...state,
         status: "complete",
         confidence: event.confidence,
+        metrics: event.metrics,
+      };
+    case "CITATION_RESOLVED":
+      return {
+        ...state,
+        citationResolutions: [
+          ...state.citationResolutions,
+          {
+            citation: event.citation,
+            placeholder: event.placeholder,
+            status: event.status,
+          },
+        ],
       };
     default:
       return state;
   }
 }
-

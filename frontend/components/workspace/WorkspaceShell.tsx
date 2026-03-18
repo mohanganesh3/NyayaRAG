@@ -41,6 +41,9 @@ function toTitleCase(value: string | null): string {
 }
 
 export function WorkspaceShell({ context }: WorkspaceShellProps) {
+  const defaultWorkspaceQuery =
+    "What are the strongest anticipatory bail arguments on these facts, and which binding Supreme Court cases should appear first in the note?";
+
   return (
     <div className="grid gap-4 xl:grid-cols-[19rem_minmax(0,1fr)_20rem] xl:items-start">
       <div className="space-y-4 xl:sticky xl:top-6">
@@ -153,45 +156,30 @@ export function WorkspaceShell({ context }: WorkspaceShellProps) {
             <CitationBadge tone="binding">Workspace ready</CitationBadge>
           </div>
 
-          <div className="mt-6 rounded-[1.35rem] border border-[rgba(16,32,53,0.1)] bg-white/72 p-4">
-            <label
-              className="font-mono text-xs uppercase tracking-[0.2em] text-ink-700"
-              htmlFor="workspace-query"
-            >
-              Query input
-            </label>
-            <textarea
-              className="mt-3 min-h-36 w-full rounded-[1.1rem] border border-[rgba(16,32,53,0.08)] bg-paper-50 px-4 py-4 text-sm leading-7 text-ink-900 outline-none transition placeholder:text-ink-700/70 focus:border-[rgba(171,127,40,0.35)] focus:ring-2 focus:ring-[rgba(171,127,40,0.12)]"
-              defaultValue="What are the strongest anticipatory bail arguments on these facts, and which binding Supreme Court cases should appear first in the note?"
-              id="workspace-query"
-            />
-
-            <div className="mt-4 flex flex-wrap gap-2">
-              {suggestedQueries.map((query) => (
-                <button
-                  className="rounded-full border border-[rgba(16,32,53,0.1)] bg-paper-50 px-3 py-2 text-left text-xs font-medium tracking-[0.02em] text-ink-800 transition hover:border-[rgba(171,127,40,0.28)] hover:bg-white"
-                  key={query}
-                  type="button"
-                >
-                  {query}
-                </button>
-              ))}
-            </div>
-
-            <div className="mt-5 flex flex-wrap gap-2">
-              {context.charges_sections.map((section) => (
-                <CitationBadge key={section} tone="uncertain">
-                  {section}
-                </CitationBadge>
-              ))}
-              {context.bnss_equivalents.map((section) => (
-                <CitationBadge key={section} tone="verified">
-                  {section}
-                </CitationBadge>
-              ))}
-            </div>
+          <div className="mt-6 flex flex-wrap gap-2">
+            {context.charges_sections.map((section) => (
+              <CitationBadge key={section} tone="uncertain">
+                {section}
+              </CitationBadge>
+            ))}
+            {context.bnss_equivalents.map((section) => (
+              <CitationBadge key={section} tone="verified">
+                {section}
+              </CitationBadge>
+            ))}
           </div>
         </SurfaceCard>
+
+        <BootstrapQueryConsole
+          buttonLabel="Start Research"
+          defaultQuery={defaultWorkspaceQuery}
+          description="Submit a live query from the workspace and watch ordered backend steps resolve into an answer stream. The same SSE contract now powers the actual center lane."
+          heading="Live process display for workspace research."
+          sectionLabel="Live research display"
+          showContractNotes={false}
+          showQueryInput
+          suggestedQueries={suggestedQueries}
+        />
 
         <SurfaceCard className="p-5" tone="muted">
           <div className="grid gap-4 lg:grid-cols-2">
@@ -237,13 +225,6 @@ export function WorkspaceShell({ context }: WorkspaceShellProps) {
             </div>
           </div>
         </SurfaceCard>
-
-        <BootstrapQueryConsole
-          buttonLabel="Run Research Demo"
-          description="This will become the live process lane for workspace research. The shell already places it inside the center column where verified answer rendering will follow."
-          heading="Run the current streaming pipeline inside the workspace."
-          sectionLabel="Live research stream"
-        />
       </div>
 
       <div className="space-y-4 xl:sticky xl:top-6">
