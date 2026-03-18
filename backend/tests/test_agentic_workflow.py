@@ -3,8 +3,9 @@ import json
 from app.db.base import Base
 from app.db.session import build_engine, get_db
 from app.main import app
-from app.models import CaseContext, CaseStage, CaseType
+from app.models import BillingPlanCode, BillingSubscriptionStatus, CaseContext, CaseStage, CaseType
 from app.services.agentic_workflow import LangGraphAgenticWorkflow
+from app.services.billing import billing_store
 from app.services.query_runtime import query_runtime
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session, sessionmaker
@@ -83,6 +84,12 @@ def test_workspace_query_stream_uses_agentic_path_and_emits_agent_logs(tmp_path)
 
     with Session(engine) as session:
         session.add(_build_case_context())
+        billing_store.upsert_subscription(
+            session,
+            auth_user_id="clerk-user-1",
+            plan_code=BillingPlanCode.ADVOCATE_PRO,
+            status=BillingSubscriptionStatus.ACTIVE,
+        )
         session.commit()
 
     def override_get_db():

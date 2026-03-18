@@ -18,6 +18,7 @@ from app.schemas.query import (
     QueryHistoryResponse,
     QuerySubmissionRequest,
 )
+from app.services.billing import billing_store
 from app.services.query_history import query_history_store
 from app.services.query_runtime import query_runtime
 
@@ -63,6 +64,21 @@ def submit_query(
     db: DbSession,
     auth: OptionalAuth,
 ) -> QueryAcceptedResponse:
+    allowance = billing_store.evaluate_query_allowance(
+        db,
+        auth_user_id=auth.user_id if auth.is_authenticated else None,
+        workspace_id=request.workspace_id,
+    )
+    if not allowance.allowed:
+        raise HTTPException(
+            status_code=allowance.status_code or status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": allowance.code or "billing_rejected",
+                "message": allowance.message or "This request is blocked by billing policy.",
+                "detail": allowance.detail,
+            },
+        )
+
     if request.workspace_id is not None:
         if not auth.is_authenticated:
             raise HTTPException(

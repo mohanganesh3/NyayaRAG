@@ -18,5 +18,8 @@ describe("HomePage", () => {
     ).toBeInTheDocument();
     expect(screen.getByText(/20 queries per day/i)).toBeInTheDocument();
     expect(screen.getByText(/Shared research workspaces/i)).toBeInTheDocument();
+    expect(
+      screen.getByRole("link", { name: /Manage plans and billing/i }),
+    ).toBeInTheDocument();
   });
 });

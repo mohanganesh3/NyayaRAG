@@ -20,6 +20,11 @@ class Settings(BaseSettings):
     clerk_publishable_key: str | None = None
     clerk_secret_key: str | None = None
     allow_dev_auth_headers: bool = True
+    razorpay_key_id: str | None = None
+    razorpay_key_secret: str | None = None
+    razorpay_webhook_secret: str | None = None
+    razorpay_plan_id_advocate_pro: str = "plan_advocate_pro"
+    razorpay_plan_id_chamber_pro: str = "plan_chamber_pro"
 
     model_config = SettingsConfigDict(
         env_file=BACKEND_ROOT / ".env",

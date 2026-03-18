@@ -1,3 +1,5 @@
+import Link from "next/link";
+
 import { BootstrapQueryConsole } from "../components/research/BootstrapQueryConsole";
 import {
   CitationBadge,
@@ -5,6 +7,7 @@ import {
   SectionLabel,
   SurfaceCard,
 } from "../components/design";
+import { pricingTiers } from "../lib/billing";
 
 const proofLayers = [
   {
@@ -30,46 +33,6 @@ const dashboardPreview = [
   { label: "Citation accuracy target", value: ">98%" },
   { label: "Appeal-chain accuracy", value: "Required: 100%" },
   { label: "Temporal validity", value: "Required: 100%" },
-];
-
-const pricingTiers = [
-  {
-    name: "Free",
-    price: "₹0",
-    cadence: "/month",
-    tone: "paper" as const,
-    points: [
-      "20 queries per day",
-      "Supreme Court + High Courts",
-      "Basic citation verification",
-      "No document upload",
-    ],
-  },
-  {
-    name: "Advocate Pro",
-    price: "₹799",
-    cadence: "/month",
-    tone: "ink" as const,
-    badge: "Most practical",
-    points: [
-      "Unlimited queries",
-      "All courts + tribunals + bare acts",
-      "Upload up to 5 live case workspaces",
-      "Citation graph and export workflow",
-    ],
-  },
-  {
-    name: "Chamber Pro",
-    price: "₹2,499",
-    cadence: "/month",
-    tone: "muted" as const,
-    points: [
-      "5 seats included",
-      "Shared research workspaces",
-      "Priority support",
-      "API access and team history",
-    ],
-  },
 ];
 
 const apiBaseUrl =
@@ -282,6 +245,14 @@ export default function HomePage() {
               sustainable for chambers, and identical trust rules across every
               plan.
             </p>
+            <div className="flex flex-wrap gap-3">
+              <Link
+                className="rounded-full border border-[rgba(16,32,53,0.1)] bg-white/78 px-5 py-3 text-sm font-semibold text-ink-950 shadow-card transition hover:-translate-y-0.5 hover:border-[rgba(171,127,40,0.28)]"
+                href="/billing"
+              >
+                Manage plans and billing
+              </Link>
+            </div>
           </div>
 
           <div className="grid gap-4 lg:grid-cols-3">

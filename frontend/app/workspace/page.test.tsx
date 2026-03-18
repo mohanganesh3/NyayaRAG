@@ -16,6 +16,7 @@ describe("WorkspacePage", () => {
     expect(screen.getByText(/Relevant passage/i)).toBeInTheDocument();
     expect(screen.getByText(/Protected workspace/i)).toBeInTheDocument();
     expect(screen.getByText(/Session history/i)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Manage billing/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Start Research/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Open transparency log/i })).toBeInTheDocument();
     expect(screen.getByText(/Verification Status/i)).toBeInTheDocument();

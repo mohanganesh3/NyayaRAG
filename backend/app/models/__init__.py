@@ -1,3 +1,11 @@
+from app.models.billing import (
+    BillingInvoice,
+    BillingInvoiceStatus,
+    BillingPlanCode,
+    BillingProvider,
+    BillingSubscription,
+    BillingSubscriptionStatus,
+)
 from app.models.criminal_codes import (
     CRIMINAL_CODE_CUTOVER,
     CriminalCode,
@@ -35,6 +43,12 @@ __all__ = [
     "AppealOutcome",
     "ApprovalStatus",
     "BackgroundTaskRun",
+    "BillingInvoice",
+    "BillingInvoiceStatus",
+    "BillingPlanCode",
+    "BillingProvider",
+    "BillingSubscription",
+    "BillingSubscriptionStatus",
     "CaseContext",
     "CaseStage",
     "CaseType",

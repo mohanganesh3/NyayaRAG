@@ -3,7 +3,15 @@ from __future__ import annotations
 from app.db.base import Base
 from app.db.session import build_engine, get_db
 from app.main import app
-from app.models import CaseContext, CaseStage, CaseType
+from app.models import (
+    BillingInvoiceStatus,
+    BillingPlanCode,
+    BillingSubscriptionStatus,
+    CaseContext,
+    CaseStage,
+    CaseType,
+)
+from app.services.billing import billing_store
 from app.services.query_runtime import query_runtime
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session, sessionmaker
@@ -43,6 +51,20 @@ def test_workspace_route_requires_auth(tmp_path) -> None:
 
     with Session(engine) as session:
         case_id = _seed_workspace(session, owner_auth_user_id="clerk-user-1")
+        billing_store.upsert_subscription(
+            session,
+            auth_user_id="clerk-user-1",
+            plan_code=BillingPlanCode.ADVOCATE_PRO,
+            status=BillingSubscriptionStatus.ACTIVE,
+        )
+        billing_store.create_invoice(
+            session,
+            auth_user_id="clerk-user-1",
+            amount_minor=79900,
+            status=BillingInvoiceStatus.PAID,
+            description="Advocate Pro monthly subscription",
+        )
+        session.commit()
 
     def override_get_db():
         with Session(engine) as session:
@@ -112,6 +134,13 @@ def test_authenticated_query_history_is_scoped_to_session_and_workspace(tmp_path
 
     with Session(engine) as session:
         case_id = _seed_workspace(session, owner_auth_user_id="clerk-user-1")
+        billing_store.upsert_subscription(
+            session,
+            auth_user_id="clerk-user-1",
+            plan_code=BillingPlanCode.ADVOCATE_PRO,
+            status=BillingSubscriptionStatus.ACTIVE,
+        )
+        session.commit()
 
     def override_get_db():
         with Session(engine) as session:
@@ -181,8 +210,13 @@ def test_stream_query_requires_same_authenticated_user(tmp_path) -> None:
     Base.metadata.create_all(engine)
     session_factory = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
 
+    def override_get_db():
+        with Session(engine) as session:
+            yield session
+
     query_runtime.reset()
     query_runtime.set_session_factory_provider(lambda: session_factory)
+    app.dependency_overrides[get_db] = override_get_db
 
     try:
         client = TestClient(app)
@@ -198,6 +232,7 @@ def test_stream_query_requires_same_authenticated_user(tmp_path) -> None:
         )
     finally:
         query_runtime.reset()
+        app.dependency_overrides.clear()
         engine.dispose()
 
     assert response.status_code == 403
