@@ -298,6 +298,18 @@ class QueryRuntime:
         )
         sequence += 1
 
+        serialized_answer = self._to_json_compatible(workflow_result.structured_answer)
+        if isinstance(serialized_answer, dict):
+            events.append(
+                AnswerReadyEvent(
+                    type=StreamEventType.ANSWER_READY,
+                    sequence=sequence,
+                    emitted_at=datetime.now(UTC),
+                    answer=serialized_answer,
+                )
+            )
+            sequence += 1
+
         for token in self._chunk_tokens(workflow_result.synthesis):
             events.append(
                 TokenEvent(
@@ -325,6 +337,8 @@ class QueryRuntime:
                 metrics={
                     "mode": "agentic",
                     "pipeline": "agentic_rag",
+                    "overall_status": workflow_result.structured_answer.overall_status.value,
+                    "structured_answer_ready": True,
                     "event_count": sequence,
                     "agent_count": len(workflow_result.agent_logs),
                 },

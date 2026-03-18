@@ -4,6 +4,7 @@ from app.db.base import Base
 from app.db.session import build_engine, get_db
 from app.main import app
 from app.models import BillingPlanCode, BillingSubscriptionStatus, CaseContext, CaseStage, CaseType
+from app.rag import CitationBadgeStatus, StructuredAnswerSectionKind
 from app.services.agentic_workflow import LangGraphAgenticWorkflow
 from app.services.billing import billing_store
 from app.services.query_runtime import query_runtime
@@ -65,6 +66,17 @@ def test_langgraph_agentic_workflow_runs_with_sqlite_checkpointer(tmp_path) -> N
     assert result.research_plan
     assert result.verification_result["verified_claim_ratio"] == 0.96
     assert "Legal Position:" in result.synthesis
+    assert result.structured_answer.query == "What are my bail arguments?"
+    assert result.structured_answer.overall_status is CitationBadgeStatus.UNCERTAIN
+    assert (
+        result.structured_answer.section(StructuredAnswerSectionKind.LEGAL_POSITION).claims
+    )
+    assert (
+        result.structured_answer.section(StructuredAnswerSectionKind.APPLICABLE_LAW).claims
+    )
+    assert result.structured_answer.section(
+        StructuredAnswerSectionKind.VERIFICATION_STATUS
+    ).status_items
     assert agent_names == [
         "DocumentUnderstandingAgent",
         "ResearchPlannerAgent",
@@ -130,6 +142,7 @@ def test_workspace_query_stream_uses_agentic_path_and_emits_agent_logs(tmp_path)
     agent_names = [payload["agent"] for payload in payloads if payload["type"] == "AGENT_LOG"]
 
     assert "AGENT_LOG" in event_types
+    assert "ANSWER_READY" in event_types
     assert payloads[1]["data"]["pipeline"] == "agentic_rag"
     assert agent_names == [
         "DocumentUnderstandingAgent",
@@ -142,3 +155,9 @@ def test_workspace_query_stream_uses_agentic_path_and_emits_agent_logs(tmp_path)
     ]
     assert payloads[-1]["type"] == "COMPLETE"
     assert payloads[-1]["metrics"]["pipeline"] == "agentic_rag"
+    assert payloads[-1]["metrics"]["structured_answer_ready"] is True
+    answer_ready_event = next(
+        payload for payload in payloads if payload["type"] == "ANSWER_READY"
+    )
+    assert answer_ready_event["answer"]["overall_status"] == "UNCERTAIN"
+    assert answer_ready_event["answer"]["sections"][0]["kind"] == "LEGAL_POSITION"

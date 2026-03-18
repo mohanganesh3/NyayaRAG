@@ -7,11 +7,19 @@ from pathlib import Path
 from tempfile import gettempdir
 from typing import Annotated, Any, TypedDict, TypeVar, cast
 
+from app.rag import (
+    CitationBadgeStatus,
+    StructuredAnswer,
+    StructuredAnswerSection,
+    StructuredAnswerSectionKind,
+    StructuredClaim,
+    VerificationStatusItem,
+)
 from app.schemas.legal import CaseContextRead
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import END, START, StateGraph
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 class AgentLogEntry(BaseModel):
@@ -31,6 +39,8 @@ class ResearchPlanDecision(BaseModel):
 
 
 class AgenticWorkflowResult(BaseModel):
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
     synthesis: str
     research_plan: list[ResearchQuestion]
     statutory_findings: list[str]
@@ -38,6 +48,7 @@ class AgenticWorkflowResult(BaseModel):
     contradictions: list[str]
     verification_result: dict[str, object]
     agent_logs: list[AgentLogEntry]
+    structured_answer: StructuredAnswer
 
 
 class AgenticWorkflowState(TypedDict):
@@ -199,6 +210,10 @@ class LangGraphAgenticWorkflow:
         config: RunnableConfig = {"configurable": {"thread_id": thread_id}}
         graph = cast(Any, self._graph)
         final_state = cast(AgenticWorkflowState, graph.invoke(initial_state, config=config))
+        structured_answer = self._build_structured_answer(
+            user_query=user_query,
+            final_state=final_state,
+        )
         return AgenticWorkflowResult(
             synthesis=str(final_state["synthesis"]),
             research_plan=[
@@ -212,6 +227,7 @@ class LangGraphAgenticWorkflow:
             agent_logs=[
                 AgentLogEntry.model_validate(entry) for entry in final_state.get("agent_log", [])
             ],
+            structured_answer=structured_answer,
         )
 
     def close(self) -> None:
@@ -416,6 +432,233 @@ class LangGraphAgenticWorkflow:
                 }
             ],
         }
+
+    def _build_structured_answer(
+        self,
+        *,
+        user_query: str,
+        final_state: AgenticWorkflowState,
+    ) -> StructuredAnswer:
+        synthesis = str(final_state.get("synthesis") or "")
+        verification = cast(dict[str, object], final_state.get("verification_result", {}))
+        overall_status = self._overall_status(verification)
+
+        legal_claims: list[StructuredClaim] = []
+        legal_position = self._slice_synthesis_section(
+            synthesis,
+            current_label="Legal Position:",
+            next_label="Statutory Findings:",
+        )
+        if legal_position:
+            legal_claims.append(
+                self._build_claim(
+                    text=legal_position,
+                    status=overall_status,
+                    reason=(
+                        "Synthesized from uploaded documents, stage-specific planning, "
+                        "and contradiction review."
+                    ),
+                )
+            )
+
+        contradictions = [
+            str(item) for item in cast(list[object], final_state.get("contradictions", []))
+        ]
+        for contradiction in contradictions:
+            legal_claims.append(
+                self._build_claim(
+                    text=contradiction,
+                    status=CitationBadgeStatus.UNCERTAIN,
+                    reason=(
+                        "The contradiction checker flagged a procedural caution that should "
+                        "be addressed in submissions."
+                    ),
+                )
+            )
+
+        statutory_findings = [
+            str(item) for item in cast(list[object], final_state.get("statutory_findings", []))
+        ]
+        applicable_law_claims = tuple(
+            self._build_claim(
+                text=finding,
+                status=overall_status,
+                reason=(
+                    "Derived from uploaded-document statutory analysis and criminal-code "
+                    "mapping."
+                ),
+            )
+            for finding in statutory_findings
+        )
+
+        precedent_findings = [
+            str(item) for item in cast(list[object], final_state.get("precedent_findings", []))
+        ]
+        key_case_claims = tuple(
+            self._build_claim(
+                text=finding,
+                status=overall_status,
+                reason=(
+                    "Derived from agentic precedent research aligned to the uploaded court "
+                    "context and stage."
+                ),
+            )
+            for finding in precedent_findings
+        )
+
+        verification_section = StructuredAnswerSection(
+            kind=StructuredAnswerSectionKind.VERIFICATION_STATUS,
+            title="Verification Status",
+            status_items=self._build_verification_items(
+                verification=verification,
+                claim_count=(
+                    len(legal_claims)
+                    + len(applicable_law_claims)
+                    + len(key_case_claims)
+                ),
+                overall_status=overall_status,
+            ),
+        )
+
+        return StructuredAnswer(
+            query=user_query,
+            overall_status=overall_status,
+            sections=(
+                StructuredAnswerSection(
+                    kind=StructuredAnswerSectionKind.LEGAL_POSITION,
+                    title="Legal Position",
+                    claims=tuple(legal_claims),
+                ),
+                StructuredAnswerSection(
+                    kind=StructuredAnswerSectionKind.APPLICABLE_LAW,
+                    title="Applicable Law",
+                    claims=applicable_law_claims,
+                ),
+                StructuredAnswerSection(
+                    kind=StructuredAnswerSectionKind.KEY_CASES,
+                    title="Key Cases",
+                    claims=key_case_claims,
+                ),
+                verification_section,
+            ),
+        )
+
+    def _build_claim(
+        self,
+        *,
+        text: str,
+        status: CitationBadgeStatus,
+        reason: str,
+    ) -> StructuredClaim:
+        return StructuredClaim(
+            text=text,
+            status=status,
+            reason=reason,
+            citation=None,
+            source_passage=None,
+            appeal_warning=None,
+            reretrieved=False,
+            citation_badges=(),
+        )
+
+    def _build_verification_items(
+        self,
+        *,
+        verification: dict[str, object],
+        claim_count: int,
+        overall_status: CitationBadgeStatus,
+    ) -> tuple[VerificationStatusItem, ...]:
+        verified_ratio = self._verified_ratio(verification)
+        verified_claims = round(verified_ratio * claim_count)
+        uncertain_claims = max(claim_count - verified_claims, 0)
+        issues_flagged = self._issues_flagged(verification)
+
+        return (
+            VerificationStatusItem(
+                label="Verified Claims",
+                value=str(verified_claims),
+                status=(
+                    CitationBadgeStatus.VERIFIED
+                    if verified_claims > 0
+                    else CitationBadgeStatus.UNVERIFIED
+                ),
+            ),
+            VerificationStatusItem(
+                label="Claims Requiring Review",
+                value=str(uncertain_claims),
+                status=(
+                    CitationBadgeStatus.UNCERTAIN
+                    if uncertain_claims > 0
+                    else CitationBadgeStatus.VERIFIED
+                ),
+            ),
+            VerificationStatusItem(
+                label="Workflow Confidence",
+                value=f"{verified_ratio:.2f}",
+                status=overall_status,
+            ),
+            VerificationStatusItem(
+                label="Issues Flagged",
+                value=str(issues_flagged),
+                status=(
+                    CitationBadgeStatus.UNCERTAIN
+                    if issues_flagged > 0
+                    else CitationBadgeStatus.VERIFIED
+                ),
+            ),
+            VerificationStatusItem(
+                label="Resolved Citations",
+                value="0",
+                status=CitationBadgeStatus.VERIFIED,
+            ),
+            VerificationStatusItem(
+                label="Unresolved Citations",
+                value="0",
+                status=CitationBadgeStatus.VERIFIED,
+            ),
+        )
+
+    def _overall_status(
+        self,
+        verification: dict[str, object],
+    ) -> CitationBadgeStatus:
+        verified_ratio = self._verified_ratio(verification)
+        issues_flagged = self._issues_flagged(verification)
+        if verified_ratio >= 0.95 and issues_flagged == 0:
+            return CitationBadgeStatus.VERIFIED
+        if verified_ratio >= 0.75:
+            return CitationBadgeStatus.UNCERTAIN
+        return CitationBadgeStatus.UNVERIFIED
+
+    def _verified_ratio(self, verification: dict[str, object]) -> float:
+        raw_value = verification.get("verified_claim_ratio", 0.0)
+        if isinstance(raw_value, int | float):
+            return float(raw_value)
+        return 0.0
+
+    def _issues_flagged(self, verification: dict[str, object]) -> int:
+        raw_value = verification.get("issues_flagged", 0)
+        if isinstance(raw_value, int):
+            return raw_value
+        if isinstance(raw_value, float):
+            return int(raw_value)
+        if isinstance(raw_value, str) and raw_value.isdigit():
+            return int(raw_value)
+        return 0
+
+    def _slice_synthesis_section(
+        self,
+        synthesis: str,
+        *,
+        current_label: str,
+        next_label: str,
+    ) -> str:
+        if current_label not in synthesis:
+            return synthesis.strip()
+        section = synthesis.split(current_label, maxsplit=1)[1]
+        if next_label in section:
+            section = section.split(next_label, maxsplit=1)[0]
+        return " ".join(section.split()).strip()
 
 
 agentic_workflow = LangGraphAgenticWorkflow()
