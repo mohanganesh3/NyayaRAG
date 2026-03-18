@@ -179,6 +179,14 @@ export default function HomePage() {
                   <CitationBadge tone="uncertain">Weekly benchmark</CitationBadge>
                   <CitationBadge tone="persuasive">Public /api/trust</CitationBadge>
                 </div>
+                <div className="pt-1">
+                  <Link
+                    className="rounded-full border border-[rgba(16,32,53,0.1)] bg-white/78 px-5 py-3 text-sm font-semibold text-ink-950 shadow-card transition hover:-translate-y-0.5 hover:border-[rgba(171,127,40,0.28)]"
+                    href="/trust"
+                  >
+                    Open full trust page
+                  </Link>
+                </div>
               </div>
 
               <div className="rounded-[1.35rem] border border-[rgba(16,32,53,0.08)] bg-white/70 p-4">
