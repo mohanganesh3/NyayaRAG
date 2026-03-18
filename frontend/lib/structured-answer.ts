@@ -282,6 +282,49 @@ export function collectStructuredAnswerSources(
   return sources;
 }
 
+export function serializeStructuredAnswerToMarkdown(
+  answer: StructuredAnswer,
+): string {
+  const lines: string[] = [
+    `# ${answer.query || "NyayaRAG Structured Answer"}`,
+    "",
+    `Overall status: ${answer.overallStatus}`,
+    "",
+  ];
+
+  for (const section of answer.sections) {
+    lines.push(`## ${section.title}`);
+    lines.push("");
+
+    for (const claim of section.claims) {
+      lines.push(`- ${claim.text}`);
+      lines.push(`  - Status: ${claim.status}`);
+      if (claim.citation) {
+        lines.push(`  - Citation: ${claim.citation}`);
+      }
+      if (claim.reason) {
+        lines.push(`  - Note: ${claim.reason}`);
+      }
+      if (claim.sourcePassage) {
+        lines.push(`  - Source passage: ${claim.sourcePassage}`);
+      }
+    }
+
+    if (section.statusItems.length > 0) {
+      lines.push("");
+      lines.push("### Verification");
+      lines.push("");
+      for (const item of section.statusItems) {
+        lines.push(`- ${item.label}: ${item.value} (${item.status})`);
+      }
+    }
+
+    lines.push("");
+  }
+
+  return lines.join("\n").trim();
+}
+
 export const demoStructuredAnswer: StructuredAnswer = {
   query:
     "What are the strongest anticipatory bail arguments on these facts, and which binding Supreme Court cases should appear first in the note?",

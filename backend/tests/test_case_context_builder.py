@@ -214,6 +214,70 @@ def test_workspace_route_returns_persisted_case_context(tmp_path) -> None:
     assert body["data"]["bnss_equivalents"] == ["BNS 101", "BNSS 480"]
 
 
+def test_workspace_upload_route_processes_documents_and_persists_context(tmp_path) -> None:
+    engine = build_engine(f"sqlite+pysqlite:///{tmp_path / 'workspace_upload.db'}")
+    Base.metadata.create_all(engine)
+
+    with Session(engine) as session:
+        _seed_criminal_mappings(session)
+        session.commit()
+
+    def override_get_db():
+        with Session(engine) as session:
+            yield session
+
+    app.dependency_overrides[get_db] = override_get_db
+    try:
+        client = TestClient(app)
+        response = client.post(
+            "/api/workspace/upload",
+            data={
+                "case_id": "case-upload-001",
+                "court": "Bombay High Court",
+                "case_number": "BA/999/2026",
+            },
+            files=[
+                (
+                    "files",
+                    (
+                        "bail-application.docx",
+                        _make_docx(
+                            [
+                                "Bail Application BA/999/2026 before Bombay High Court.",
+                                "Petitioner: Arjun Rao. Respondent: State of Maharashtra.",
+                                "Adv. Meera Rao for petitioner.",
+                                "Offence registered under Section 302 IPC.",
+                                (
+                                    "Previous order dated 20 March 2026: "
+                                    "Sessions Court rejected bail under Section 437 CrPC."
+                                ),
+                            ]
+                        ),
+                        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    ),
+                )
+            ],
+            headers={
+                "X-Clerk-User-Id": "clerk-user-1",
+                "X-Clerk-Display-Name": "Mohan Ganesh",
+            },
+        )
+    finally:
+        app.dependency_overrides.clear()
+        engine.dispose()
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["data"]["case_id"] == "case-upload-001"
+    assert body["data"]["owner_auth_user_id"] == "clerk-user-1"
+    assert body["data"]["owner_display_name"] == "Mohan Ganesh"
+    assert body["data"]["court"] == "Bombay High Court"
+    assert body["data"]["case_number"] == "BA/999/2026"
+    assert sorted(body["data"]["charges_sections"]) == ["CrPC 437", "IPC 302"]
+    assert sorted(body["data"]["bnss_equivalents"]) == ["BNS 101", "BNSS 480"]
+    assert body["data"]["uploaded_docs"][0]["name"] == "bail-application.docx"
+
+
 def test_workspace_route_returns_not_found_for_missing_case_context(tmp_path) -> None:
     engine = build_engine(f"sqlite+pysqlite:///{tmp_path / 'workspace_missing.db'}")
     Base.metadata.create_all(engine)

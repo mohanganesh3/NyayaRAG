@@ -58,6 +58,161 @@ export type WorkspaceCaseContext = {
   uploaded_docs: WorkspaceUploadedDocument[];
 };
 
+type WorkspaceRecord = Record<string, unknown>;
+
+function asRecord(value: unknown): WorkspaceRecord | null {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as WorkspaceRecord)
+    : null;
+}
+
+function readString(value: unknown): string | null {
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+function normalizeTimelineItems(value: unknown): WorkspaceTimelineItem[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  const normalized: WorkspaceTimelineItem[] = [];
+
+  for (const item of value) {
+    const record = asRecord(item);
+    if (!record) {
+      continue;
+    }
+
+    normalized.push({
+      date: readString(record.date) ?? undefined,
+      detail: readString(record.detail) ?? "",
+      label: readString(record.label) ?? "Undifferentiated event",
+    });
+  }
+
+  return normalized;
+}
+
+function normalizeOrders(value: unknown): WorkspaceOrderItem[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  const normalized: WorkspaceOrderItem[] = [];
+
+  for (const item of value) {
+    const record = asRecord(item);
+    if (!record) {
+      continue;
+    }
+
+    normalized.push({
+      court: readString(record.court) ?? "Unknown court",
+      date: readString(record.date) ?? undefined,
+      outcome:
+        readString(record.outcome) ??
+        readString(record.status) ??
+        "No outcome extracted",
+    });
+  }
+
+  return normalized;
+}
+
+function normalizeUploadedDocuments(value: unknown): WorkspaceUploadedDocument[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((item) => {
+      const record = asRecord(item);
+      if (!record) {
+        return null;
+      }
+
+      return {
+        confidence:
+          typeof record.confidence === "number" ? record.confidence : 0,
+        document_type:
+          readString(record.document_type) ??
+          readString(record.document_mode) ??
+          "uploaded_document",
+        name: readString(record.name) ?? "Uploaded document",
+        pages:
+          typeof record.pages === "number"
+            ? record.pages
+            : typeof record.page_count === "number"
+              ? record.page_count
+              : 1,
+      };
+    })
+    .filter((item): item is WorkspaceUploadedDocument => item !== null);
+}
+
+export function normalizeWorkspaceContext(
+  value: unknown,
+): WorkspaceCaseContext | null {
+  const record = asRecord(value);
+  if (!record) {
+    return null;
+  }
+
+  return {
+    advocates: Array.isArray(record.advocates)
+      ? record.advocates.filter((item): item is string => typeof item === "string")
+      : [],
+    appellant_petitioner: readString(record.appellant_petitioner),
+    bail_history: normalizeOrders(record.bail_history),
+    bnss_equivalents: Array.isArray(record.bnss_equivalents)
+      ? record.bnss_equivalents.filter(
+          (item): item is string => typeof item === "string",
+        )
+      : [],
+    case_id: readString(record.case_id) ?? "workspace-unavailable",
+    case_number: readString(record.case_number),
+    case_type:
+      (readString(record.case_type) as WorkspaceCaseType | null) ?? null,
+    charges_sections: Array.isArray(record.charges_sections)
+      ? record.charges_sections.filter(
+          (item): item is string => typeof item === "string",
+        )
+      : [],
+    court: readString(record.court),
+    doc_extraction_confidence:
+      typeof record.doc_extraction_confidence === "number"
+        ? record.doc_extraction_confidence
+        : 0,
+    key_facts: normalizeTimelineItems(record.key_facts),
+    open_legal_issues: Array.isArray(record.open_legal_issues)
+      ? record.open_legal_issues.filter(
+          (item): item is string => typeof item === "string",
+        )
+      : [],
+    previous_orders: normalizeOrders(record.previous_orders),
+    respondent_opposite_party: readString(record.respondent_opposite_party),
+    stage: (readString(record.stage) as WorkspaceCaseStage | null) ?? null,
+    statutes_involved: Array.isArray(record.statutes_involved)
+      ? record.statutes_involved.filter(
+          (item): item is string => typeof item === "string",
+        )
+      : [],
+    uploaded_docs: normalizeUploadedDocuments(record.uploaded_docs),
+  };
+}
+
+export function workspaceContextStorageKey(authUserId: string | null): string {
+  return `nyayarag.workspace.active.${authUserId ?? "anonymous"}`;
+}
+
+export function workspaceHistoryStorageKey(caseId: string): string {
+  return `nyayarag.workspace.history.${caseId}`;
+}
+
+export function workspaceSavedAnswersStorageKey(caseId: string): string {
+  return `nyayarag.workspace.saved_answers.${caseId}`;
+}
+
 export const demoWorkspaceContext: WorkspaceCaseContext = {
   case_id: "demo-bail-001",
   appellant_petitioner: "Arjun Rao",

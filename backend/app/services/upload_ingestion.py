@@ -383,3 +383,6 @@ class UploadIngestionService:
             return round(max(0.0, min(base_confidence, 0.2)), 3)
         density_bonus = min(len(text), 300) / 1500
         return round(min(0.98, max(base_confidence, 0.45) + density_bonus), 3)
+
+
+upload_ingestion_service = UploadIngestionService()

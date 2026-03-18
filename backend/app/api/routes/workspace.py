@@ -1,6 +1,6 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from sqlalchemy.orm import Session
 
 from app.api.dependencies.auth import AuthContext, require_auth_context
@@ -11,6 +11,7 @@ from app.schemas.query import QueryHistoryEntryRead
 from app.schemas.workspace import CaseContextResponse, WorkspaceQueryHistoryResponse
 from app.services.case_contexts import case_context_builder
 from app.services.query_history import query_history_store
+from app.services.upload_ingestion import upload_ingestion_service
 
 router = APIRouter(tags=["workspace"])
 DbSession = Annotated[Session, Depends(get_db)]
@@ -62,3 +63,48 @@ def get_workspace_history(
     return WorkspaceQueryHistoryResponse(
         data=[QueryHistoryEntryRead.model_validate(entry) for entry in entries]
     )
+
+
+@router.post("/workspace/upload", response_model=CaseContextResponse)
+async def upload_workspace_documents(
+    db: DbSession,
+    auth: RequiredAuth,
+    files: Annotated[list[UploadFile], File(...)],
+    case_id: Annotated[str | None, Form()] = None,
+    court: Annotated[str | None, Form()] = None,
+    case_number: Annotated[str | None, Form()] = None,
+) -> CaseContextResponse:
+    processed_documents = []
+
+    for upload in files:
+        content = await upload.read()
+        try:
+            processed = upload_ingestion_service.process_upload(
+                file_name=upload.filename or "uploaded-document",
+                content=content,
+                media_type=upload.content_type,
+            )
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "code": "upload_processing_failed",
+                    "message": str(exc),
+                    "detail": {"file_name": upload.filename},
+                },
+            ) from exc
+        processed_documents.append(processed)
+
+    context = case_context_builder.build_from_uploads(
+        db,
+        processed_documents=processed_documents,
+        case_id=case_id,
+        court=court,
+        case_number=case_number,
+        owner_auth_user_id=auth.user_id,
+        owner_display_name=auth.display_name,
+        auth_provider=auth.provider,
+    )
+    db.commit()
+    db.refresh(context)
+    return CaseContextResponse(data=CaseContextRead.model_validate(context))

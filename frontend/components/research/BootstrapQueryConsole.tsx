@@ -27,6 +27,7 @@ type BootstrapQueryConsoleProps = {
   description?: string;
   defaultQuery?: string;
   heading?: string;
+  onQuerySubmitted?: (queryText: string) => void;
   sectionLabel?: string;
   showContractNotes?: boolean;
   showQueryInput?: boolean;
@@ -41,6 +42,7 @@ export function BootstrapQueryConsole({
   description = "This dummy query proves the Phase 0 streaming contract: submit a query, receive typed SSE events, and render process steps plus token output on the client.",
   defaultQuery = "Bootstrap streaming contract check",
   heading = "Observe the verification path before the answer lands.",
+  onQuerySubmitted,
   sectionLabel = "Streaming Contract Preview",
   showContractNotes = true,
   showQueryInput = false,
@@ -78,6 +80,7 @@ export function BootstrapQueryConsole({
   async function runStreamDemo() {
     eventSourceRef.current?.close();
     setRequestError(null);
+    onQuerySubmitted?.(queryText);
     dispatch({ type: "RESET" });
     dispatch({
       type: "STEP_START",
