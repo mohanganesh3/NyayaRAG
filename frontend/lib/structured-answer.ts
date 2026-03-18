@@ -51,6 +51,8 @@ export type StructuredAnswer = {
   sections: StructuredAnswerSection[];
 };
 
+type StructuredAnswerRecord = Record<string, unknown>;
+
 export type StructuredAnswerSource = {
   appealWarning: string | null;
   chunkId: string | null;
@@ -62,6 +64,164 @@ export type StructuredAnswerSource = {
   sourcePassage: string | null;
   status: StructuredAnswerBadgeStatus;
 };
+
+function asRecord(value: unknown): StructuredAnswerRecord | null {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as StructuredAnswerRecord)
+    : null;
+}
+
+function readValue(
+  value: StructuredAnswerRecord,
+  ...keys: string[]
+): unknown {
+  for (const key of keys) {
+    if (key in value) {
+      return value[key];
+    }
+  }
+  return undefined;
+}
+
+function normalizeStatus(value: unknown): StructuredAnswerBadgeStatus {
+  return value === "VERIFIED" || value === "UNCERTAIN" || value === "UNVERIFIED"
+    ? value
+    : "UNVERIFIED";
+}
+
+function normalizeInlineCitationBadge(value: unknown): InlineCitationBadge | null {
+  const record = asRecord(value);
+  if (!record) {
+    return null;
+  }
+
+  return {
+    appealWarning:
+      (readValue(record, "appealWarning", "appeal_warning") as string | null | undefined) ??
+      null,
+    chunkId:
+      (readValue(record, "chunkId", "chunk_id") as string | null | undefined) ?? null,
+    citation:
+      (readValue(record, "citation") as string | null | undefined) ?? null,
+    docId: (readValue(record, "docId", "doc_id") as string | null | undefined) ?? null,
+    label: String(readValue(record, "label") ?? "Unlabeled authority"),
+    message: String(readValue(record, "message") ?? ""),
+    placeholderToken: String(
+      readValue(record, "placeholderToken", "placeholder_token") ?? "",
+    ),
+    sourcePassage:
+      (readValue(record, "sourcePassage", "source_passage") as
+        | string
+        | null
+        | undefined) ?? null,
+    status: normalizeStatus(readValue(record, "status")),
+  };
+}
+
+function normalizeStructuredClaim(value: unknown): StructuredClaim | null {
+  const record = asRecord(value);
+  if (!record) {
+    return null;
+  }
+
+  const badges = Array.isArray(readValue(record, "citationBadges", "citation_badges"))
+    ? (readValue(record, "citationBadges", "citation_badges") as unknown[])
+        .map(normalizeInlineCitationBadge)
+        .filter((badge): badge is InlineCitationBadge => badge !== null)
+    : [];
+
+  return {
+    appealWarning:
+      (readValue(record, "appealWarning", "appeal_warning") as string | null | undefined) ??
+      null,
+    citation:
+      (readValue(record, "citation") as string | null | undefined) ?? null,
+    citationBadges: badges,
+    reason: String(readValue(record, "reason") ?? ""),
+    reretrieved: Boolean(readValue(record, "reretrieved")),
+    sourcePassage:
+      (readValue(record, "sourcePassage", "source_passage") as
+        | string
+        | null
+        | undefined) ?? null,
+    status: normalizeStatus(readValue(record, "status")),
+    text: String(readValue(record, "text") ?? ""),
+  };
+}
+
+function normalizeVerificationStatusItem(
+  value: unknown,
+): VerificationStatusItem | null {
+  const record = asRecord(value);
+  if (!record) {
+    return null;
+  }
+
+  return {
+    label: String(readValue(record, "label") ?? ""),
+    status: normalizeStatus(readValue(record, "status")),
+    value: String(readValue(record, "value") ?? ""),
+  };
+}
+
+function normalizeSectionKind(value: unknown): StructuredAnswerSectionKind {
+  return value === "LEGAL_POSITION" ||
+    value === "APPLICABLE_LAW" ||
+    value === "KEY_CASES" ||
+    value === "VERIFICATION_STATUS"
+    ? value
+    : "VERIFICATION_STATUS";
+}
+
+function normalizeStructuredAnswerSection(
+  value: unknown,
+): StructuredAnswerSection | null {
+  const record = asRecord(value);
+  if (!record) {
+    return null;
+  }
+
+  const claims = Array.isArray(readValue(record, "claims"))
+    ? (readValue(record, "claims") as unknown[])
+        .map(normalizeStructuredClaim)
+        .filter((claim): claim is StructuredClaim => claim !== null)
+    : [];
+  const statusItems = Array.isArray(readValue(record, "statusItems", "status_items"))
+    ? (readValue(record, "statusItems", "status_items") as unknown[])
+        .map(normalizeVerificationStatusItem)
+        .filter((item): item is VerificationStatusItem => item !== null)
+    : [];
+
+  return {
+    kind: normalizeSectionKind(readValue(record, "kind")),
+    title: String(readValue(record, "title") ?? ""),
+    claims,
+    statusItems,
+  };
+}
+
+export function normalizeStructuredAnswer(
+  value: unknown,
+): StructuredAnswer | null {
+  const record = asRecord(value);
+  if (!record) {
+    return null;
+  }
+
+  const sections = Array.isArray(readValue(record, "sections"))
+    ? (readValue(record, "sections") as unknown[])
+        .map(normalizeStructuredAnswerSection)
+        .filter((section): section is StructuredAnswerSection => section !== null)
+    : [];
+
+  return {
+    overallStatus: normalizeStatus(
+      readValue(record, "overallStatus", "overall_status"),
+    ),
+    query: String(readValue(record, "query") ?? ""),
+    sections,
+  };
+}
 
 export function buildStructuredSourceId(input: {
   chunkId: string | null;

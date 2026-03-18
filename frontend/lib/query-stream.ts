@@ -1,3 +1,8 @@
+import {
+  normalizeStructuredAnswer,
+  type StructuredAnswer,
+} from "./structured-answer";
+
 export type StreamEventType =
   | "STEP_START"
   | "STEP_COMPLETE"
@@ -5,6 +10,7 @@ export type StreamEventType =
   | "AGENT_LOG"
   | "TOKEN"
   | "CITATION_RESOLVED"
+  | "ANSWER_READY"
   | "COMPLETE";
 
 type StreamEventBase = {
@@ -47,6 +53,11 @@ export type CitationResolvedEvent = StreamEventBase & {
   status: string;
 };
 
+export type AnswerReadyEvent = StreamEventBase & {
+  type: "ANSWER_READY";
+  answer: Record<string, unknown>;
+};
+
 export type CompleteEvent = StreamEventBase & {
   type: "COMPLETE";
   confidence: number;
@@ -60,6 +71,7 @@ export type QueryStreamEvent =
   | AgentLogEvent
   | TokenEvent
   | CitationResolvedEvent
+  | AnswerReadyEvent
   | CompleteEvent;
 
 export type QueryAcceptedResponse = {
@@ -111,6 +123,7 @@ export type QueryStreamState = {
   agentLogs: QueryStreamAgentLog[];
   citationResolutions: QueryStreamCitationResolution[];
   metrics: Record<string, unknown> | null;
+  structuredAnswer: StructuredAnswer | null;
 };
 
 export function createInitialQueryStreamState(): QueryStreamState {
@@ -123,6 +136,7 @@ export function createInitialQueryStreamState(): QueryStreamState {
     agentLogs: [],
     citationResolutions: [],
     metrics: null,
+    structuredAnswer: null,
   };
 }
 
@@ -235,6 +249,12 @@ export function applyQueryStreamEvent(
         ...state,
         status: "streaming",
         output: `${state.output}${event.token}`,
+      };
+    case "ANSWER_READY":
+      return {
+        ...state,
+        status: "streaming",
+        structuredAnswer: normalizeStructuredAnswer(event.answer),
       };
     case "COMPLETE":
       return {

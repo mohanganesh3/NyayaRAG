@@ -65,6 +65,7 @@ def test_stream_query_emits_expected_sse_events(tmp_path) -> None:
     payloads = [json.loads(chunk.removeprefix("data: ")) for chunk in chunks]
 
     assert payloads[0]["type"] == "STEP_START"
+    assert any(payload["type"] == "ANSWER_READY" for payload in payloads)
     assert any(payload["type"] == "TOKEN" for payload in payloads)
     assert payloads[-1]["type"] == "COMPLETE"
     assert payloads[-1]["metrics"]["mode"] == "verified_query_execution"

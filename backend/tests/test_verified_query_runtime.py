@@ -136,10 +136,16 @@ def test_stream_query_executes_verified_hybrid_pipeline(tmp_path) -> None:
         payload["type"] == "CITATION_RESOLVED" and payload["status"] == "VERIFIED"
         for payload in payloads
     )
+    answer_ready_event = next(
+        payload for payload in payloads if payload["type"] == "ANSWER_READY"
+    )
+    assert answer_ready_event["answer"]["overall_status"] == "VERIFIED"
+    assert answer_ready_event["answer"]["sections"][0]["kind"] == "LEGAL_POSITION"
     complete_event = payloads[-1]
     assert complete_event["type"] == "COMPLETE"
     assert complete_event["metrics"]["pipeline"] == "hybrid_crag"
     assert complete_event["metrics"]["mode"] == "verified_query_execution"
+    assert complete_event["metrics"]["structured_answer_ready"] is True
 
     streamed_output = "".join(
         payload["token"] for payload in payloads if payload["type"] == "TOKEN"

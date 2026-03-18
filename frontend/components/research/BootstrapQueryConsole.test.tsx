@@ -111,8 +111,29 @@ describe("BootstrapQueryConsole", () => {
       source.onmessage?.(
         new MessageEvent("message", {
           data: JSON.stringify({
-            type: "COMPLETE",
+            type: "ANSWER_READY",
             sequence: 5,
+            emitted_at: "2026-03-16T00:00:01Z",
+            answer: {
+              query: "What are the strongest anticipatory bail arguments?",
+              overall_status: "VERIFIED",
+              sections: [
+                {
+                  kind: "LEGAL_POSITION",
+                  title: "Legal Position",
+                  claims: [],
+                  status_items: [],
+                },
+              ],
+            },
+          }),
+        }),
+      );
+      source.onmessage?.(
+        new MessageEvent("message", {
+          data: JSON.stringify({
+            type: "COMPLETE",
+            sequence: 6,
             emitted_at: "2026-03-16T00:00:02Z",
             confidence: 1,
             metrics: { mode: "dummy" },
@@ -128,6 +149,12 @@ describe("BootstrapQueryConsole", () => {
       ).toBeInTheDocument();
       expect(screen.getByText("1.00")).toBeInTheDocument();
       expect(screen.getByText(/Detected hybrid_rag route\./i)).toBeInTheDocument();
+      expect(screen.getByText(/Structured answer ready/i)).toBeInTheDocument();
+      expect(
+        screen.getAllByText(
+          /What are the strongest anticipatory bail arguments\?/i,
+        ).length,
+      ).toBeGreaterThan(0);
     });
 
     const latestState = onStateChange.mock.calls.at(-1)?.[0];
@@ -136,6 +163,10 @@ describe("BootstrapQueryConsole", () => {
       message: "Detected hybrid_rag route.",
     });
     expect(latestState?.metrics).toMatchObject({ mode: "dummy" });
+    expect(latestState?.structuredAnswer).toMatchObject({
+      overallStatus: "VERIFIED",
+      query: "What are the strongest anticipatory bail arguments?",
+    });
 
     const stepTitles = Array.from(
       container.querySelectorAll(".process-step-title"),

@@ -12,6 +12,7 @@ class StreamEventType(StrEnum):
     AGENT_LOG = "AGENT_LOG"
     TOKEN = "TOKEN"
     CITATION_RESOLVED = "CITATION_RESOLVED"
+    ANSWER_READY = "ANSWER_READY"
     COMPLETE = "COMPLETE"
 
 
@@ -55,6 +56,11 @@ class CitationResolvedEvent(StreamEventBase):
     status: str
 
 
+class AnswerReadyEvent(StreamEventBase):
+    type: Literal[StreamEventType.ANSWER_READY]
+    answer: dict[str, object]
+
+
 class CompleteEvent(StreamEventBase):
     type: Literal[StreamEventType.COMPLETE]
     confidence: float
@@ -68,7 +74,7 @@ QueryStreamEvent = Annotated[
     | AgentLogEvent
     | TokenEvent
     | CitationResolvedEvent
+    | AnswerReadyEvent
     | CompleteEvent,
     Field(discriminator="type"),
 ]
-

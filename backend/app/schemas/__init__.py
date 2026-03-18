@@ -29,6 +29,7 @@ from app.schemas.query import (
 )
 from app.schemas.stream import (
     AgentLogEvent,
+    AnswerReadyEvent,
     CitationResolvedEvent,
     CompleteEvent,
     QueryStreamEvent,
@@ -47,6 +48,7 @@ from app.schemas.workspace import CaseContextResponse
 
 __all__ = [
     "AgentLogEvent",
+    "AnswerReadyEvent",
     "AppealNodeRead",
     "BackgroundTaskRunRead",
     "CaseContextRead",

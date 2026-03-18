@@ -255,6 +255,31 @@ export function BootstrapQueryConsole({
             </div>
           </SurfaceCard>
 
+          {state.structuredAnswer ? (
+            <SurfaceCard className="p-5" tone="paper">
+              <SectionLabel>Structured answer ready</SectionLabel>
+              <div className="mt-4 flex flex-wrap items-center gap-3">
+                <CitationBadge
+                  tone={
+                    state.structuredAnswer.overallStatus === "VERIFIED"
+                      ? "verified"
+                      : state.structuredAnswer.overallStatus === "UNCERTAIN"
+                        ? "uncertain"
+                        : "unverified"
+                  }
+                >
+                  {state.structuredAnswer.overallStatus}
+                </CitationBadge>
+                <span className="text-xs uppercase tracking-[0.16em] text-ink-700">
+                  {state.structuredAnswer.sections.length} sections
+                </span>
+              </div>
+              <p className="mt-3 text-sm leading-7 text-ink-800">
+                {state.structuredAnswer.query}
+              </p>
+            </SurfaceCard>
+          ) : null}
+
           {state.agentLogs.length > 0 ? (
             <SurfaceCard className="p-5" tone="paper">
               <SectionLabel>Recent agent activity</SectionLabel>

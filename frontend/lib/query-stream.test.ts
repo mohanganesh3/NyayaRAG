@@ -42,8 +42,36 @@ describe("query stream reducer", () => {
       emitted_at: "2026-03-16T00:00:02Z",
     });
     state = applyQueryStreamEvent(state, {
-      type: "COMPLETE",
+      type: "ANSWER_READY",
       sequence: 6,
+      emitted_at: "2026-03-16T00:00:02Z",
+      answer: {
+        query: "What are the strongest anticipatory bail arguments?",
+        overall_status: "VERIFIED",
+        sections: [
+          {
+            kind: "LEGAL_POSITION",
+            title: "Legal Position",
+            claims: [
+              {
+                text: "Liberty-first anticipatory bail reasoning is available.",
+                status: "VERIFIED",
+                reason: "Grounded in binding authority.",
+                citation: "Siddharam Satlingappa Mhetre",
+                source_passage: "Personal liberty requires concrete necessity.",
+                appeal_warning: null,
+                reretrieved: false,
+                citation_badges: [],
+              },
+            ],
+            status_items: [],
+          },
+        ],
+      },
+    });
+    state = applyQueryStreamEvent(state, {
+      type: "COMPLETE",
+      sequence: 7,
       emitted_at: "2026-03-16T00:00:03Z",
       confidence: 1,
       metrics: { mode: "dummy", pipeline: "hybrid_rag" },
@@ -63,6 +91,14 @@ describe("query stream reducer", () => {
       status: "VERIFIED",
     });
     expect(state.metrics).toMatchObject({ pipeline: "hybrid_rag" });
+    expect(state.structuredAnswer).toMatchObject({
+      overallStatus: "VERIFIED",
+      query: "What are the strongest anticipatory bail arguments?",
+    });
+    expect(state.structuredAnswer?.sections[0]?.claims[0]).toMatchObject({
+      text: "Liberty-first anticipatory bail reasoning is available.",
+      sourcePassage: "Personal liberty requires concrete necessity.",
+    });
 
     state = applyQueryStreamEvent(state, { type: "RESET" });
     expect(state).toEqual(createInitialQueryStreamState());

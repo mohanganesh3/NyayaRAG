@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { BootstrapQueryConsole } from "../research/BootstrapQueryConsole";
 import { createInitialQueryStreamState } from "../../lib/query-stream";
@@ -15,6 +15,7 @@ import {
 import {
   collectStructuredAnswerSources,
   demoStructuredAnswer,
+  type StructuredAnswer,
   type StructuredAnswerSource,
 } from "../../lib/structured-answer";
 import type { WorkspaceCaseContext } from "../../lib/workspace";
@@ -54,12 +55,30 @@ export function WorkspaceShell({
 }: WorkspaceShellProps) {
   const defaultWorkspaceQuery =
     "What are the strongest anticipatory bail arguments on these facts, and which binding Supreme Court cases should appear first in the note?";
-  const availableSources = collectStructuredAnswerSources(demoStructuredAnswer);
   const [streamState, setStreamState] = useState(createInitialQueryStreamState);
   const [isTransparencyOpen, setIsTransparencyOpen] = useState(false);
+  const activeAnswer: StructuredAnswer =
+    streamState.structuredAnswer ?? demoStructuredAnswer;
+  const availableSources = collectStructuredAnswerSources(activeAnswer);
   const [activeSourceId, setActiveSourceId] = useState<string | null>(
     availableSources[0]?.id ?? null,
   );
+
+  useEffect(() => {
+    if (availableSources.length === 0) {
+      if (activeSourceId !== null) {
+        setActiveSourceId(null);
+      }
+      return;
+    }
+
+    const sourceStillAvailable = availableSources.some(
+      (source) => source.id === activeSourceId,
+    );
+    if (!sourceStillAvailable) {
+      setActiveSourceId(availableSources[0]?.id ?? null);
+    }
+  }, [activeSourceId, availableSources]);
 
   const activeSource =
     availableSources.find((source) => source.id === activeSourceId) ??
@@ -245,6 +264,11 @@ export function WorkspaceShell({
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <CitationBadge tone="binding">Workspace ready</CitationBadge>
+              <CitationBadge
+                tone={streamState.structuredAnswer ? "verified" : "persuasive"}
+              >
+                {streamState.structuredAnswer ? "Live answer" : "Demo answer fallback"}
+              </CitationBadge>
               <button
                 className="rounded-full border border-[rgba(16,32,53,0.1)] bg-white/78 px-4 py-2 text-sm font-semibold text-ink-950 transition hover:-translate-y-0.5 hover:border-[rgba(171,127,40,0.28)]"
                 onClick={() => {
@@ -290,13 +314,13 @@ export function WorkspaceShell({
 
         <StructuredAnswerRenderer
           activeSourceId={activeSourceId}
-          answer={demoStructuredAnswer}
+          answer={activeAnswer}
           onSelectSource={handleSelectSource}
         />
 
         <CitationGraph
           activeSourceId={activeSourceId}
-          answer={demoStructuredAnswer}
+          answer={activeAnswer}
           onSelectSource={handleSelectSource}
         />
 

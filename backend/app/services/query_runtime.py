@@ -1,8 +1,9 @@
 import asyncio
 import logging
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, fields, is_dataclass
 from datetime import UTC, datetime
+from enum import Enum
 from uuid import uuid4
 
 from app.api.dependencies.auth import AuthContext
@@ -13,6 +14,7 @@ from app.schemas.legal import CaseContextRead
 from app.schemas.query import QueryAcceptedData
 from app.schemas.stream import (
     AgentLogEvent,
+    AnswerReadyEvent,
     CitationResolvedEvent,
     CompleteEvent,
     QueryStreamEvent,
@@ -483,6 +485,16 @@ class QueryRuntime:
         )
         sequence += 1
 
+        events.append(
+            AnswerReadyEvent(
+                type=StreamEventType.ANSWER_READY,
+                sequence=sequence,
+                emitted_at=datetime.now(UTC),
+                answer=self._serialize_structured_answer(execution),
+            )
+        )
+        sequence += 1
+
         for token in self._chunk_tokens(execution.resolved_draft.rendered_text):
             events.append(
                 TokenEvent(
@@ -512,6 +524,7 @@ class QueryRuntime:
                     "uncertain_claims": execution.verification_result.uncertain_count,
                     "unsupported_claims": execution.verification_result.unsupported_count,
                     "overall_status": execution.structured_answer.overall_status.value,
+                    "structured_answer_ready": True,
                     "event_count": sequence,
                 },
             )
@@ -523,6 +536,31 @@ class QueryRuntime:
 
     def _chunk_tokens(self, text: str, chunk_size: int = 48) -> list[str]:
         return [text[index : index + chunk_size] for index in range(0, len(text), chunk_size)]
+
+    def _serialize_structured_answer(
+        self,
+        execution: VerifiedQueryExecutionResult,
+    ) -> dict[str, object]:
+        serialized = self._to_json_compatible(execution.structured_answer)
+        if isinstance(serialized, dict):
+            return serialized
+        return {"query": execution.analysis.raw_query, "sections": []}
+
+    def _to_json_compatible(self, value: object) -> object:
+        if is_dataclass(value):
+            return {
+                field.name: self._to_json_compatible(getattr(value, field.name))
+                for field in fields(value)
+            }
+        if isinstance(value, Enum):
+            return value.value
+        if isinstance(value, dict):
+            return {
+                str(key): self._to_json_compatible(item) for key, item in value.items()
+            }
+        if isinstance(value, list | tuple):
+            return [self._to_json_compatible(item) for item in value]
+        return value
 
     def _mark_query_completed(
         self,
