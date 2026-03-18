@@ -3,7 +3,17 @@ import json
 from app.db.base import Base
 from app.db.session import build_engine, get_db
 from app.main import app
-from app.models import BillingPlanCode, BillingSubscriptionStatus, CaseContext, CaseStage, CaseType
+from app.models import (
+    BillingPlanCode,
+    BillingSubscriptionStatus,
+    CaseContext,
+    CaseStage,
+    CaseType,
+    DocumentChunk,
+    LegalDocument,
+    LegalDocumentType,
+    ValidityStatus,
+)
 from app.rag import CitationBadgeStatus, StructuredAnswerSectionKind
 from app.services.agentic_workflow import LangGraphAgenticWorkflow
 from app.services.billing import billing_store
@@ -49,16 +59,146 @@ def _build_case_context() -> CaseContext:
     )
 
 
+def _seed_agentic_corpus(session: Session) -> None:
+    murder_text = (
+        "Whoever commits murder shall be punished with death or imprisonment for life."
+    )
+    anticipatory_bail_text = (
+        "When any person accused of a non-bailable offence apprehends arrest, "
+        "the High Court or Court of Session may grant anticipatory bail."
+    )
+    session.add(
+        LegalDocument(
+            doc_id="doc-bns-101",
+            doc_type=LegalDocumentType.STATUTE,
+            court="Parliament of India",
+            current_validity=ValidityStatus.GOOD_LAW,
+            practice_areas=["criminal"],
+            jurisdiction_binding=["All India"],
+            jurisdiction_persuasive=[],
+            language="en",
+            full_text=murder_text,
+            parser_version="seed-v1",
+        )
+    )
+    session.add(
+        DocumentChunk(
+            chunk_id="chunk-bns-101",
+            doc_id="doc-bns-101",
+            doc_type=LegalDocumentType.STATUTE,
+            text=murder_text,
+            text_normalized=murder_text.lower(),
+            chunk_index=0,
+            total_chunks=1,
+            section_header="Section 101 - Murder",
+            act_name="Bharatiya Nyaya Sanhita, 2023",
+            section_number="101",
+            court="Parliament of India",
+            jurisdiction_binding=["All India"],
+            jurisdiction_persuasive=[],
+            current_validity=ValidityStatus.GOOD_LAW,
+            practice_area=["criminal"],
+            is_in_force=True,
+        )
+    )
+    session.add(
+        LegalDocument(
+            doc_id="doc-bnss-480",
+            doc_type=LegalDocumentType.STATUTE,
+            court="Parliament of India",
+            current_validity=ValidityStatus.GOOD_LAW,
+            practice_areas=["criminal"],
+            jurisdiction_binding=["All India"],
+            jurisdiction_persuasive=[],
+            language="en",
+            full_text=anticipatory_bail_text,
+            parser_version="seed-v1",
+        )
+    )
+    session.add(
+        DocumentChunk(
+            chunk_id="chunk-bnss-480",
+            doc_id="doc-bnss-480",
+            doc_type=LegalDocumentType.STATUTE,
+            text=anticipatory_bail_text,
+            text_normalized=anticipatory_bail_text.lower(),
+            chunk_index=0,
+            total_chunks=1,
+            section_header="Section 480 - Bail in non-bailable offence",
+            act_name="Bharatiya Nagarik Suraksha Sanhita, 2023",
+            section_number="480",
+            court="Parliament of India",
+            jurisdiction_binding=["All India"],
+            jurisdiction_persuasive=[],
+            current_validity=ValidityStatus.GOOD_LAW,
+            practice_area=["criminal"],
+            is_in_force=True,
+        )
+    )
+    session.add(
+        LegalDocument(
+            doc_id="doc-sc-bail-liberty",
+            doc_type=LegalDocumentType.JUDGMENT,
+            court="Supreme Court",
+            citation="(2025) 3 SCC 100",
+            parties={"appellant": "Asha Rao", "respondent": "State of Maharashtra"},
+            current_validity=ValidityStatus.GOOD_LAW,
+            practice_areas=["criminal"],
+            jurisdiction_binding=["All India"],
+            jurisdiction_persuasive=[],
+            bench=["Justice A", "Justice B"],
+            coram=2,
+            language="en",
+            full_text=(
+                "The Supreme Court held that bail decisions must protect liberty and "
+                "that custody requires concrete investigative justification."
+            ),
+            parser_version="seed-v1",
+        )
+    )
+    session.add(
+        DocumentChunk(
+            chunk_id="chunk-sc-bail-liberty",
+            doc_id="doc-sc-bail-liberty",
+            doc_type=LegalDocumentType.JUDGMENT,
+            text=(
+                "The Supreme Court held that bail decisions must protect liberty and "
+                "that custody requires concrete investigative justification."
+            ),
+            text_normalized=(
+                "the supreme court held that bail decisions must protect liberty and "
+                "that custody requires concrete investigative justification."
+            ),
+            chunk_index=0,
+            total_chunks=1,
+            section_header="Holding",
+            court="Supreme Court",
+            citation="(2025) 3 SCC 100",
+            jurisdiction_binding=["All India"],
+            jurisdiction_persuasive=[],
+            current_validity=ValidityStatus.GOOD_LAW,
+            practice_area=["criminal"],
+        )
+    )
+    session.commit()
+
+
 def test_langgraph_agentic_workflow_runs_with_sqlite_checkpointer(tmp_path) -> None:
+    engine = build_engine(f"sqlite+pysqlite:///{tmp_path / 'agentic_workflow_grounded.db'}")
+    Base.metadata.create_all(engine)
     workflow = LangGraphAgenticWorkflow(sqlite_path=tmp_path / "agentic.sqlite")
     try:
-        result = workflow.run(
-            user_query="What are my bail arguments?",
-            case_context=_build_case_context(),
-            thread_id="thread-agentic-1",
-        )
+        with Session(engine) as session:
+            _seed_agentic_corpus(session)
+            result = workflow.run(
+                user_query="What are my bail arguments?",
+                case_context=_build_case_context(),
+                thread_id="thread-agentic-1",
+                session=session,
+            )
     finally:
         workflow.close()
+        engine.dispose()
 
     agent_names = [entry.agent for entry in result.agent_logs]
 
@@ -73,6 +213,22 @@ def test_langgraph_agentic_workflow_runs_with_sqlite_checkpointer(tmp_path) -> N
     )
     assert (
         result.structured_answer.section(StructuredAnswerSectionKind.APPLICABLE_LAW).claims
+    )
+    assert (
+        result.structured_answer.section(
+            StructuredAnswerSectionKind.APPLICABLE_LAW
+        ).claims[0].citation_badges
+    )
+    assert (
+        result.structured_answer.section(
+            StructuredAnswerSectionKind.KEY_CASES
+        ).claims[0].citation_badges
+    )
+    assert (
+        result.structured_answer.section(
+            StructuredAnswerSectionKind.KEY_CASES
+        ).claims[0].citation_badges[0].doc_id
+        == "doc-sc-bail-liberty"
     )
     assert result.structured_answer.section(
         StructuredAnswerSectionKind.VERIFICATION_STATUS
@@ -96,6 +252,7 @@ def test_workspace_query_stream_uses_agentic_path_and_emits_agent_logs(tmp_path)
 
     with Session(engine) as session:
         session.add(_build_case_context())
+        _seed_agentic_corpus(session)
         billing_store.upsert_subscription(
             session,
             auth_user_id="clerk-user-1",
@@ -161,3 +318,11 @@ def test_workspace_query_stream_uses_agentic_path_and_emits_agent_logs(tmp_path)
     )
     assert answer_ready_event["answer"]["overall_status"] == "UNCERTAIN"
     assert answer_ready_event["answer"]["sections"][0]["kind"] == "LEGAL_POSITION"
+    assert (
+        answer_ready_event["answer"]["sections"][1]["claims"][0]["citation_badges"][0]["doc_id"]
+        == "doc-bns-101"
+    )
+    assert (
+        answer_ready_event["answer"]["sections"][2]["claims"][0]["citation_badges"][0]["doc_id"]
+        == "doc-sc-bail-liberty"
+    )

@@ -229,11 +229,20 @@ class QueryRuntime:
         pipeline_reason: str,
     ) -> list[QueryStreamEvent]:
         context_read = CaseContextRead.model_validate(workspace_context)
-        workflow_result = agentic_workflow.run(
-            user_query=record.query,
-            case_context=context_read,
-            thread_id=record.query_id,
-        )
+        try:
+            with self._session_factory_provider()() as session:
+                workflow_result = agentic_workflow.run(
+                    user_query=record.query,
+                    case_context=context_read,
+                    thread_id=record.query_id,
+                    session=session,
+                )
+        except SQLAlchemyError:
+            workflow_result = agentic_workflow.run(
+                user_query=record.query,
+                case_context=context_read,
+                thread_id=record.query_id,
+            )
 
         sequence = 1
         events: list[QueryStreamEvent] = [
