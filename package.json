@@ -1,0 +1,19 @@
+{
+  "name": "nyayarag",
+  "private": true,
+  "packageManager": "pnpm@9.15.0",
+  "scripts": {
+    "bootstrap": "pnpm install && uv sync --project backend",
+    "dev:frontend": "pnpm --dir frontend dev",
+    "dev:backend": "uv run --project backend uvicorn app.main:app --reload --host 0.0.0.0 --port 8000",
+    "dev:worker": "uv run --project backend celery -A app.tasks.celery_app:celery_app worker --loglevel=INFO",
+    "lint": "pnpm --dir frontend lint && uv run --project backend ruff check backend/app backend/tests",
+    "typecheck": "pnpm --dir frontend typecheck && uv run --project backend mypy backend/app",
+    "test": "pnpm --dir frontend test && uv run --project backend pytest",
+    "db:upgrade": "uv run --project backend alembic -c backend/alembic.ini upgrade head",
+    "db:downgrade": "uv run --project backend alembic -c backend/alembic.ini downgrade base",
+    "infra:up": "docker-compose -f infrastructure/docker-compose.yml up -d",
+    "infra:down": "docker-compose -f infrastructure/docker-compose.yml down -v",
+    "infra:logs": "docker-compose -f infrastructure/docker-compose.yml logs -f"
+  }
+}
