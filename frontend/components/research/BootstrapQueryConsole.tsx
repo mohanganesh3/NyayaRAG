@@ -14,6 +14,7 @@ import {
   type ErrorResponse,
   type QueryAcceptedResponse,
   type QueryStreamEvent,
+  type QueryStreamState,
   applyQueryStreamEvent,
   createInitialQueryStreamState,
 } from "../../lib/query-stream";
@@ -31,6 +32,7 @@ type BootstrapQueryConsoleProps = {
   showQueryInput?: boolean;
   suggestedQueries?: string[];
   workspaceId?: string;
+  onStateChange?: (state: QueryStreamState) => void;
 };
 
 export function BootstrapQueryConsole({
@@ -43,6 +45,7 @@ export function BootstrapQueryConsole({
   showQueryInput = false,
   suggestedQueries = [],
   workspaceId,
+  onStateChange,
 }: BootstrapQueryConsoleProps = {}) {
   const [state, dispatch] = useReducer(
     (
@@ -65,6 +68,10 @@ export function BootstrapQueryConsole({
   useEffect(() => {
     setQueryText(defaultQuery);
   }, [defaultQuery]);
+
+  useEffect(() => {
+    onStateChange?.(state);
+  }, [onStateChange, state]);
 
   async function runStreamDemo() {
     eventSourceRef.current?.close();

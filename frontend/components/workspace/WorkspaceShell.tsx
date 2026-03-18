@@ -3,6 +3,7 @@
 import { useState } from "react";
 
 import { BootstrapQueryConsole } from "../research/BootstrapQueryConsole";
+import { createInitialQueryStreamState } from "../../lib/query-stream";
 import {
   CitationBadge,
   MetricPill,
@@ -15,7 +16,9 @@ import {
   type StructuredAnswerSource,
 } from "../../lib/structured-answer";
 import type { WorkspaceCaseContext } from "../../lib/workspace";
+import { CitationGraph } from "./CitationGraph";
 import { StructuredAnswerRenderer } from "./StructuredAnswerRenderer";
+import { TransparencyDrawer } from "./TransparencyDrawer";
 
 type WorkspaceShellProps = {
   context: WorkspaceCaseContext;
@@ -42,6 +45,8 @@ export function WorkspaceShell({ context }: WorkspaceShellProps) {
   const defaultWorkspaceQuery =
     "What are the strongest anticipatory bail arguments on these facts, and which binding Supreme Court cases should appear first in the note?";
   const availableSources = collectStructuredAnswerSources(demoStructuredAnswer);
+  const [streamState, setStreamState] = useState(createInitialQueryStreamState);
+  const [isTransparencyOpen, setIsTransparencyOpen] = useState(false);
   const [activeSourceId, setActiveSourceId] = useState<string | null>(
     availableSources[0]?.id ?? null,
   );
@@ -53,6 +58,10 @@ export function WorkspaceShell({ context }: WorkspaceShellProps) {
   const relatedSources = availableSources.filter(
     (source) => source.id !== activeSource?.id,
   );
+  const transparencyEventCount =
+    streamState.steps.length +
+    streamState.agentLogs.length +
+    streamState.citationResolutions.length;
 
   function handleSelectSource(source: StructuredAnswerSource) {
     setActiveSourceId(source.id);
@@ -167,7 +176,18 @@ export function WorkspaceShell({ context }: WorkspaceShellProps) {
                 on the right.
               </p>
             </div>
-            <CitationBadge tone="binding">Workspace ready</CitationBadge>
+            <div className="flex flex-wrap items-center gap-2">
+              <CitationBadge tone="binding">Workspace ready</CitationBadge>
+              <button
+                className="rounded-full border border-[rgba(16,32,53,0.1)] bg-white/78 px-4 py-2 text-sm font-semibold text-ink-950 transition hover:-translate-y-0.5 hover:border-[rgba(171,127,40,0.28)]"
+                onClick={() => {
+                  setIsTransparencyOpen(true);
+                }}
+                type="button"
+              >
+                Open transparency log
+              </button>
+            </div>
           </div>
 
           <div className="mt-6 flex flex-wrap gap-2">
@@ -181,6 +201,9 @@ export function WorkspaceShell({ context }: WorkspaceShellProps) {
                 {section}
               </CitationBadge>
             ))}
+            <CitationBadge tone="persuasive">
+              {transparencyEventCount} live events
+            </CitationBadge>
           </div>
         </SurfaceCard>
 
@@ -193,9 +216,17 @@ export function WorkspaceShell({ context }: WorkspaceShellProps) {
           showContractNotes={false}
           showQueryInput
           suggestedQueries={suggestedQueries}
+          workspaceId={context.case_id}
+          onStateChange={setStreamState}
         />
 
         <StructuredAnswerRenderer
+          activeSourceId={activeSourceId}
+          answer={demoStructuredAnswer}
+          onSelectSource={handleSelectSource}
+        />
+
+        <CitationGraph
           activeSourceId={activeSourceId}
           answer={demoStructuredAnswer}
           onSelectSource={handleSelectSource}
@@ -341,6 +372,14 @@ export function WorkspaceShell({ context }: WorkspaceShellProps) {
           </div>
         </SurfaceCard>
       </div>
+
+      <TransparencyDrawer
+        isOpen={isTransparencyOpen}
+        onClose={() => {
+          setIsTransparencyOpen(false);
+        }}
+        streamState={streamState}
+      />
     </div>
   );
 }

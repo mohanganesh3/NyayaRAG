@@ -63,12 +63,26 @@ export type StructuredAnswerSource = {
   status: StructuredAnswerBadgeStatus;
 };
 
-function sourceIdForBadge(badge: InlineCitationBadge): string {
+export function buildStructuredSourceId(input: {
+  chunkId: string | null;
+  citation: string | null;
+  docId: string | null;
+  label: string;
+}): string {
   return [
-    badge.docId ?? "",
-    badge.chunkId ?? "",
-    badge.citation ?? badge.label,
+    input.docId ?? "",
+    input.chunkId ?? "",
+    input.citation ?? input.label,
   ].join("::");
+}
+
+function sourceIdForBadge(badge: InlineCitationBadge): string {
+  return buildStructuredSourceId({
+    docId: badge.docId,
+    chunkId: badge.chunkId,
+    citation: badge.citation,
+    label: badge.label,
+  });
 }
 
 export function collectStructuredAnswerSources(

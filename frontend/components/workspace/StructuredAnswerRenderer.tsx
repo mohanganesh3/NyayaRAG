@@ -7,6 +7,7 @@ import type {
   StructuredAnswerBadgeStatus,
   StructuredAnswerSource,
 } from "../../lib/structured-answer";
+import { buildStructuredSourceId } from "../../lib/structured-answer";
 
 type StructuredAnswerRendererProps = {
   activeSourceId: string | null;
@@ -34,9 +35,12 @@ function sourceFromBadge(
   }
 
   return {
-    id: [badge.docId ?? "", badge.chunkId ?? "", badge.citation ?? badge.label].join(
-      "::",
-    ),
+    id: buildStructuredSourceId({
+      docId: badge.docId,
+      chunkId: badge.chunkId,
+      citation: badge.citation,
+      label: badge.label,
+    }),
     label: badge.label,
     citation: badge.citation ?? badge.label,
     status: badge.status,

@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import type { Mock } from "vitest";
 
 import { BootstrapQueryConsole } from "./BootstrapQueryConsole";
 
@@ -44,14 +45,17 @@ describe("BootstrapQueryConsole", () => {
   });
 
   it("consumes and renders streamed query events", async () => {
+    const onStateChange = vi.fn();
     const { container } = render(
       <BootstrapQueryConsole
         defaultQuery="What are the strongest anticipatory bail arguments?"
+        onStateChange={onStateChange}
         showQueryInput
         suggestedQueries={[
           "What are the strongest anticipatory bail arguments?",
           "Which Supreme Court case should lead the note?",
         ]}
+        workspaceId="demo-bail-001"
       />,
     );
 
@@ -60,6 +64,10 @@ describe("BootstrapQueryConsole", () => {
     await waitFor(() => {
       expect(global.fetch).toHaveBeenCalledTimes(1);
       expect(FakeEventSource.instances).toHaveLength(1);
+    });
+    expect(JSON.parse(String((global.fetch as Mock).mock.calls[0]?.[1]?.body))).toMatchObject({
+      query: "What are the strongest anticipatory bail arguments?",
+      workspace_id: "demo-bail-001",
     });
 
     const source = FakeEventSource.instances[0];
@@ -116,6 +124,13 @@ describe("BootstrapQueryConsole", () => {
       expect(screen.getByText("1.00")).toBeInTheDocument();
       expect(screen.getByText(/Detected hybrid_rag route\./i)).toBeInTheDocument();
     });
+
+    const latestState = onStateChange.mock.calls.at(-1)?.[0];
+    expect(latestState?.agentLogs.at(-1)).toMatchObject({
+      agent: "QueryAnalyzer",
+      message: "Detected hybrid_rag route.",
+    });
+    expect(latestState?.metrics).toMatchObject({ mode: "dummy" });
 
     const stepTitles = Array.from(
       container.querySelectorAll(".process-step-title"),

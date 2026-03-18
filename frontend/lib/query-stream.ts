@@ -78,6 +78,21 @@ export type QueryStreamStep = {
   detail?: string;
 };
 
+export type QueryStreamAgentLog = {
+  agent: string;
+  emittedAt: string;
+  message: string;
+  sequence: number;
+};
+
+export type QueryStreamCitationResolution = {
+  citation: string;
+  emittedAt: string;
+  placeholder: string;
+  sequence: number;
+  status: string;
+};
+
 export type ErrorResponse = {
   success: false;
   error: {
@@ -93,15 +108,8 @@ export type QueryStreamState = {
   status: "idle" | "connecting" | "streaming" | "complete" | "error";
   errorMessage: string | null;
   confidence: number | null;
-  agentLogs: Array<{
-    agent: string;
-    message: string;
-  }>;
-  citationResolutions: Array<{
-    citation: string;
-    placeholder: string;
-    status: string;
-  }>;
+  agentLogs: QueryStreamAgentLog[];
+  citationResolutions: QueryStreamCitationResolution[];
   metrics: Record<string, unknown> | null;
 };
 
@@ -216,7 +224,9 @@ export function applyQueryStreamEvent(
           ...state.agentLogs,
           {
             agent: event.agent,
+            emittedAt: event.emitted_at,
             message: event.message,
+            sequence: event.sequence,
           },
         ],
       };
@@ -240,7 +250,9 @@ export function applyQueryStreamEvent(
           ...state.citationResolutions,
           {
             citation: event.citation,
+            emittedAt: event.emitted_at,
             placeholder: event.placeholder,
+            sequence: event.sequence,
             status: event.status,
           },
         ],
