@@ -4,6 +4,7 @@ from app.models.criminal_codes import (
     CriminalCodeMapping,
     CriminalCodeMappingStatus,
 )
+from app.models.evaluation import EvaluationRun
 from app.models.legal import (
     AppealNode,
     AppealOutcome,
@@ -43,6 +44,7 @@ __all__ = [
     "CriminalCodeMapping",
     "CriminalCodeMappingStatus",
     "DocumentChunk",
+    "EvaluationRun",
     "LegalDocument",
     "LegalDocumentType",
     "IngestionRun",

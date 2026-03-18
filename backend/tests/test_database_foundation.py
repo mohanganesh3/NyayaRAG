@@ -4,7 +4,7 @@ from alembic import command
 from alembic.config import Config
 from app.db.base import Base
 from app.db.session import build_engine
-from app.models import BackgroundTaskRun, RuntimeSetting
+from app.models import BackgroundTaskRun, EvaluationRun, RuntimeSetting
 from sqlalchemy import inspect
 
 
@@ -18,6 +18,7 @@ def _make_alembic_config(database_url: str) -> Config:
 
 def test_model_imports_are_stable() -> None:
     assert BackgroundTaskRun.__tablename__ == "background_task_runs"
+    assert EvaluationRun.__tablename__ == "evaluation_runs"
     assert RuntimeSetting.__tablename__ == "runtime_settings"
 
 
@@ -28,11 +29,13 @@ def test_test_database_can_be_created_and_torn_down(tmp_path) -> None:
     Base.metadata.create_all(engine)
     inspector = inspect(engine)
     assert "background_task_runs" in inspector.get_table_names()
+    assert "evaluation_runs" in inspector.get_table_names()
     assert "runtime_settings" in inspector.get_table_names()
 
     Base.metadata.drop_all(engine)
     inspector = inspect(engine)
     assert "background_task_runs" not in inspector.get_table_names()
+    assert "evaluation_runs" not in inspector.get_table_names()
     assert "runtime_settings" not in inspector.get_table_names()
 
     engine.dispose()
@@ -46,6 +49,7 @@ def test_alembic_migrations_run_cleanly(tmp_path) -> None:
     engine = build_engine(database_url)
     inspector = inspect(engine)
     assert "background_task_runs" in inspector.get_table_names()
+    assert "evaluation_runs" in inspector.get_table_names()
     assert "runtime_settings" in inspector.get_table_names()
     engine.dispose()
 
@@ -53,6 +57,6 @@ def test_alembic_migrations_run_cleanly(tmp_path) -> None:
     engine = build_engine(database_url)
     inspector = inspect(engine)
     assert "background_task_runs" not in inspector.get_table_names()
+    assert "evaluation_runs" not in inspector.get_table_names()
     assert "runtime_settings" not in inspector.get_table_names()
     engine.dispose()
-

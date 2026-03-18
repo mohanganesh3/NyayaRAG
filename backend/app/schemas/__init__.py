@@ -4,6 +4,7 @@ from app.schemas.criminal_codes import (
     CriminalCodeReference,
     CriminalCodeResolutionRead,
 )
+from app.schemas.evaluation import EvaluationRunRead, PublicTrustResponse, PublicTrustSnapshot
 from app.schemas.legal import (
     AppealNodeRead,
     CaseContextRead,
@@ -55,6 +56,7 @@ __all__ = [
     "CriminalCodeReference",
     "CriminalCodeResolutionRead",
     "DocumentChunkRead",
+    "EvaluationRunRead",
     "ErrorDetail",
     "ErrorResponse",
     "HealthCheckResponse",
@@ -62,6 +64,8 @@ __all__ = [
     "LegalDocumentRead",
     "PipelineType",
     "PracticeArea",
+    "PublicTrustResponse",
+    "PublicTrustSnapshot",
     "QueryAcceptedData",
     "QueryAcceptedResponse",
     "QueryAnalysis",
