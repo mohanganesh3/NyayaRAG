@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import StrEnum
@@ -7,7 +8,6 @@ from typing import Protocol
 
 from app.models import DocumentChunk, LegalDocument, LegalDocumentType
 from app.rag.graph import GraphSearchResult
-from app.rag.hybrid import HybridSearchResult
 from app.schemas import PracticeArea, QueryAnalysis, QueryType
 
 
@@ -63,7 +63,9 @@ class GeneratedAnswerDraft:
         return [placeholder.token for placeholder in self.placeholders]
 
 
-PlaceholderSearchResult = HybridSearchResult | GraphSearchResult
+_REPORTER_CITATION_PATTERN = re.compile(
+    r"\b(?:AIR\s+\d{4}\s+[A-Z]{1,4}\s+\d+|\(\d{4}\)\s+\d+\s+[A-Z]{2,10}\s+\d+)\b"
+)
 
 
 class PlaceholderOnlyGenerator:
@@ -98,7 +100,7 @@ class PlaceholderOnlyGenerator:
         self,
         query: str,
         analysis: QueryAnalysis,
-        results: Sequence[PlaceholderSearchResult],
+        results: Sequence[RetrievalResultLike],
     ) -> GeneratedAnswerDraft:
         sections: list[GeneratedSection] = []
         placeholders: list[GeneratedPlaceholder] = []
@@ -138,21 +140,32 @@ class PlaceholderOnlyGenerator:
         judgments = [
             result for result in results if result.document.doc_type is LegalDocumentType.JUDGMENT
         ]
+        statute_placeholders = [self._statute_placeholder(result) for result in statutes[:2]]
+        judgment_placeholders = [
+            self._cite_placeholder(result, analysis) for result in judgments[:3]
+        ]
+        placeholders.extend([*statute_placeholders, *judgment_placeholders])
 
         sections.append(
             GeneratedSection(
                 title="Legal Position",
-                paragraphs=(self._legal_position_paragraph(analysis, statutes, judgments),),
+                paragraphs=(
+                    self._legal_position_paragraph(
+                        analysis,
+                        statutes,
+                        judgments,
+                        statute_placeholders=statute_placeholders,
+                        judgment_placeholders=judgment_placeholders,
+                    ),
+                ),
             )
         )
 
         if statutes:
             statute_paragraphs: list[str] = []
-            for result in statutes[:2]:
-                placeholder = self._statute_placeholder(result)
-                placeholders.append(placeholder)
+            for result, placeholder in zip(statutes[:2], statute_placeholders, strict=False):
                 statute_paragraphs.append(
-                    f"The governing in-force provision should be resolved from {placeholder.token}."
+                    f"{self._grounded_excerpt(result)} {placeholder.token}"
                 )
             sections.append(
                 GeneratedSection(
@@ -179,11 +192,9 @@ class PlaceholderOnlyGenerator:
 
         if judgments:
             authority_paragraphs: list[str] = []
-            for result in judgments[:3]:
-                placeholder = self._cite_placeholder(result, analysis)
-                placeholders.append(placeholder)
+            for result, placeholder in zip(judgments[:3], judgment_placeholders, strict=False):
                 authority_paragraphs.append(
-                    f"The primary {self._authority_note(result)} is {placeholder.token}."
+                    f"{self._grounded_excerpt(result)} {placeholder.token}"
                 )
             sections.append(
                 GeneratedSection(
@@ -221,42 +232,28 @@ class PlaceholderOnlyGenerator:
     def _legal_position_paragraph(
         self,
         analysis: QueryAnalysis,
-        statutes: Sequence[PlaceholderSearchResult],
-        judgments: Sequence[PlaceholderSearchResult],
+        statutes: Sequence[RetrievalResultLike],
+        judgments: Sequence[RetrievalResultLike],
+        *,
+        statute_placeholders: Sequence[GeneratedPlaceholder],
+        judgment_placeholders: Sequence[GeneratedPlaceholder],
     ) -> str:
-        if analysis.query_type is QueryType.STATUTORY_LOOKUP:
-            if statutes and judgments:
-                return (
-                    "The retrieved materials indicate a current statutory rule "
-                    "supported by judicial interpretation, "
-                    "but each authority reference remains unresolved until verification completes."
-                )
-            if statutes:
-                return (
-                    "The retrieved materials indicate a current statutory rule, and the "
-                    "final authority references "
-                    "must remain placeholders until verification completes."
-                )
-        if analysis.query_type in {QueryType.MULTI_HOP_DOCTRINE, QueryType.CONSTITUTIONAL}:
-            return (
-                "The retrieved materials indicate an evolving doctrinal position "
-                "across multiple authorities, "
-                "with the controlling path to be resolved through verified citations."
-            )
+        if statutes and statute_placeholders:
+            return f"{self._grounded_excerpt(statutes[0])} {statute_placeholders[0].token}"
+        if judgments and judgment_placeholders:
+            return f"{self._grounded_excerpt(judgments[0])} {judgment_placeholders[0].token}"
         if analysis.practice_area is not PracticeArea.GENERAL:
             practice = analysis.practice_area.value.replace("_", " ")
             return (
-                f"The retrieved materials indicate a current {practice} position, "
-                "but the final authorities remain placeholder-only until "
-                "verification resolves them."
+                f"The current {practice} position could not yet be grounded in a "
+                "verified primary authority."
             )
         return (
-            "The retrieved materials indicate a current legal position, but the final "
-            "authorities remain "
-            "placeholder-only until verification resolves them."
+            "The current legal position could not yet be grounded in a "
+            "verified primary authority."
         )
 
-    def _statute_placeholder(self, result: PlaceholderSearchResult) -> GeneratedPlaceholder:
+    def _statute_placeholder(self, result: RetrievalResultLike) -> GeneratedPlaceholder:
         act_name = result.chunk.act_name or result.document.court or "Unknown Act"
         section_number = result.chunk.section_number or self._section_hint(
             result.chunk.section_header
@@ -274,7 +271,7 @@ class PlaceholderOnlyGenerator:
 
     def _cite_placeholder(
         self,
-        result: PlaceholderSearchResult,
+        result: RetrievalResultLike,
         analysis: QueryAnalysis,
     ) -> GeneratedPlaceholder:
         authority_scope = self._authority_scope(result)
@@ -287,7 +284,7 @@ class PlaceholderOnlyGenerator:
             chunk_id=result.chunk_id,
         )
 
-    def _authority_scope(self, result: PlaceholderSearchResult) -> str:
+    def _authority_scope(self, result: RetrievalResultLike) -> str:
         if isinstance(result, GraphSearchResult):
             phase_prefix = {
                 "foundational": "foundational doctrinal authority",
@@ -309,7 +306,7 @@ class PlaceholderOnlyGenerator:
 
     def _issue_phrase(
         self,
-        result: PlaceholderSearchResult,
+        result: RetrievalResultLike,
         analysis: QueryAnalysis,
     ) -> str:
         if result.chunk.section_number is not None:
@@ -323,7 +320,7 @@ class PlaceholderOnlyGenerator:
             return f"on {header}"
         return "on the queried issue"
 
-    def _authority_note(self, result: PlaceholderSearchResult) -> str:
+    def _authority_note(self, result: RetrievalResultLike) -> str:
         if isinstance(result, GraphSearchResult):
             return result.timeline_phase.replace("_", " ")
         authority_class = getattr(result, "authority_class", "authority")
@@ -335,6 +332,77 @@ class PlaceholderOnlyGenerator:
         else:
             court_label = "authority"
         return f"{authority_class} {court_label}"
+
+    def _grounded_excerpt(self, result: RetrievalResultLike) -> str:
+        cleaned = self._sanitize_excerpt(result.chunk.text, result.document)
+        if cleaned:
+            return cleaned
+
+        header = self._section_hint(result.chunk.section_header)
+        if header is not None:
+            return f"The relevant holding appears under {header}."
+
+        if result.document.doc_type in {
+            LegalDocumentType.STATUTE,
+            LegalDocumentType.CONSTITUTION,
+        }:
+            return "The retrieved provision supplies the operative legal text."
+
+        if isinstance(result, GraphSearchResult):
+            return (
+                f"The {result.timeline_phase.replace('_', ' ')} authority contributes to the "
+                "current doctrinal position."
+            )
+
+        return f"The retrieved {self._authority_note(result)} informs the current position."
+
+    def _sanitize_excerpt(
+        self,
+        text: str,
+        document: LegalDocument,
+    ) -> str:
+        first_sentence = self._first_sentence(text)
+        if not first_sentence:
+            return ""
+
+        sanitized = _REPORTER_CITATION_PATTERN.sub("", first_sentence)
+        party_values = sorted(
+            {
+                value.strip()
+                for value in document.parties.values()
+                if isinstance(value, str) and value.strip()
+            },
+            key=len,
+            reverse=True,
+        )
+        for party in party_values:
+            sanitized = re.sub(re.escape(party), "the party", sanitized, flags=re.IGNORECASE)
+
+        sanitized = re.sub(
+            r"\bthe party\s+v(?:\.|s\.?|ersus)?\s+the party\b",
+            "the parties",
+            sanitized,
+            flags=re.IGNORECASE,
+        )
+        sanitized = re.sub(r"\s+,", ",", sanitized)
+        sanitized = " ".join(sanitized.split()).strip(" .,;:-")
+        if not sanitized:
+            return ""
+        if sanitized[-1] not in ".!?":
+            sanitized = f"{sanitized}."
+        return sanitized
+
+    def _first_sentence(self, text: str) -> str:
+        normalized = " ".join(text.split())
+        if not normalized:
+            return ""
+        for delimiter in (".", "!", "?"):
+            if delimiter in normalized:
+                prefix, _, _ = normalized.partition(delimiter)
+                candidate = prefix.strip()
+                if candidate:
+                    return f"{candidate}{delimiter}"
+        return normalized[:220].rstrip() + ("..." if len(normalized) > 220 else "")
 
     def _unsupported_description(self, query: str, analysis: QueryAnalysis) -> str:
         if analysis.query_type is QueryType.STATUTORY_LOOKUP:

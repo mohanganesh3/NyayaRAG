@@ -13,6 +13,7 @@ from app.schemas.legal import CaseContextRead
 from app.schemas.query import QueryAcceptedData
 from app.schemas.stream import (
     AgentLogEvent,
+    CitationResolvedEvent,
     CompleteEvent,
     QueryStreamEvent,
     StepCompleteEvent,
@@ -23,6 +24,10 @@ from app.schemas.stream import (
 )
 from app.services.agentic_workflow import agentic_workflow
 from app.services.query_history import query_history_store
+from app.services.verified_query_execution import (
+    VerifiedQueryExecutionResult,
+    verified_query_execution,
+)
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -177,49 +182,42 @@ class QueryRuntime:
                 )
                 return agentic_events
 
-        events: list[QueryStreamEvent] = [
-            StepStartEvent(
-                type=StreamEventType.STEP_START,
-                sequence=1,
-                emitted_at=datetime.now(UTC),
-                step="Analyzing query...",
-            ),
-            StepCompleteEvent(
-                type=StreamEventType.STEP_COMPLETE,
-                sequence=2,
-                emitted_at=datetime.now(UTC),
-                step="Query analyzed",
-                data={"query_preview": record.query[:80], "pipeline": "bootstrap-demo"},
-            ),
-            TokenEvent(
-                type=StreamEventType.TOKEN,
-                sequence=3,
-                emitted_at=datetime.now(UTC),
-                token="NyayaRAG",
-            ),
-            TokenEvent(
-                type=StreamEventType.TOKEN,
-                sequence=4,
-                emitted_at=datetime.now(UTC),
-                token=" bootstrap stream ready.",
-            ),
-            CompleteEvent(
-                type=StreamEventType.COMPLETE,
-                sequence=5,
-                emitted_at=datetime.now(UTC),
-                confidence=1.0,
-                metrics={"mode": "dummy", "event_count": 5},
-            ),
-        ]
+        try:
+            with self._session_factory_provider()() as session:
+                execution = verified_query_execution.execute(
+                    session,
+                    query=record.query,
+                )
+        except SQLAlchemyError as exc:
+            error_message = f"Verified query execution failed: {exc}"
+            self._mark_query_error(
+                query_id=record.query_id,
+                pipeline="verified_query_execution",
+                error_message=error_message,
+            )
+            return [
+                StepErrorEvent(
+                    type=StreamEventType.STEP_ERROR,
+                    sequence=1,
+                    emitted_at=datetime.now(UTC),
+                    step="Verified query execution",
+                    error=error_message,
+                ),
+                CompleteEvent(
+                    type=StreamEventType.COMPLETE,
+                    sequence=2,
+                    emitted_at=datetime.now(UTC),
+                    confidence=0.0,
+                    metrics={"mode": "query_error", "event_count": 2},
+                ),
+            ]
 
+        events = await self._stream_verified_events(record, execution)
         self._mark_query_completed(
             query_id=record.query_id,
-            pipeline="bootstrap-demo",
+            pipeline=execution.pipeline,
             answer_preview=self._joined_output(events),
         )
-
-        for _ in events:
-            await asyncio.sleep(0)
         return events
 
     async def _stream_agentic_events(
@@ -327,6 +325,194 @@ class QueryRuntime:
                     "pipeline": "agentic_rag",
                     "event_count": sequence,
                     "agent_count": len(workflow_result.agent_logs),
+                },
+            )
+        )
+
+        for _ in events:
+            await asyncio.sleep(0)
+        return events
+
+    async def _stream_verified_events(
+        self,
+        record: StoredQuery,
+        execution: VerifiedQueryExecutionResult,
+    ) -> list[QueryStreamEvent]:
+        sequence = 1
+        events: list[QueryStreamEvent] = [
+            StepStartEvent(
+                type=StreamEventType.STEP_START,
+                sequence=sequence,
+                emitted_at=datetime.now(UTC),
+                step="Analyzing query...",
+            )
+        ]
+        sequence += 1
+        events.append(
+            StepCompleteEvent(
+                type=StreamEventType.STEP_COMPLETE,
+                sequence=sequence,
+                emitted_at=datetime.now(UTC),
+                step="Query analyzed",
+                data={
+                    "pipeline": execution.pipeline,
+                    "query_type": execution.analysis.query_type.value,
+                    "practice_area": execution.analysis.practice_area.value,
+                    "query_preview": record.query[:80],
+                },
+            )
+        )
+        sequence += 1
+
+        events.append(
+            StepStartEvent(
+                type=StreamEventType.STEP_START,
+                sequence=sequence,
+                emitted_at=datetime.now(UTC),
+                step="Retrieving authorities...",
+            )
+        )
+        sequence += 1
+        events.append(
+            StepCompleteEvent(
+                type=StreamEventType.STEP_COMPLETE,
+                sequence=sequence,
+                emitted_at=datetime.now(UTC),
+                step="Authorities retrieved",
+                data={
+                    "pipeline": execution.pipeline,
+                    "crag_action": execution.crag_result.action.value,
+                    "result_count": len(execution.crag_result.results),
+                    "temporal_findings": len(execution.crag_result.temporal_findings),
+                    **execution.retrieval_notes,
+                },
+            )
+        )
+        sequence += 1
+
+        events.append(
+            StepStartEvent(
+                type=StreamEventType.STEP_START,
+                sequence=sequence,
+                emitted_at=datetime.now(UTC),
+                step="Building placeholder draft...",
+            )
+        )
+        sequence += 1
+        events.append(
+            StepCompleteEvent(
+                type=StreamEventType.STEP_COMPLETE,
+                sequence=sequence,
+                emitted_at=datetime.now(UTC),
+                step="Placeholder draft built",
+                data={
+                    "placeholder_count": len(execution.generated_draft.placeholders),
+                    "section_count": len(execution.generated_draft.sections),
+                },
+            )
+        )
+        sequence += 1
+
+        events.append(
+            StepStartEvent(
+                type=StreamEventType.STEP_START,
+                sequence=sequence,
+                emitted_at=datetime.now(UTC),
+                step="Resolving citations...",
+            )
+        )
+        sequence += 1
+
+        for resolution in execution.resolved_draft.resolutions:
+            events.append(
+                CitationResolvedEvent(
+                    type=StreamEventType.CITATION_RESOLVED,
+                    sequence=sequence,
+                    emitted_at=datetime.now(UTC),
+                    placeholder=resolution.placeholder,
+                    citation=resolution.rendered_value,
+                    status=resolution.status.value,
+                )
+            )
+            sequence += 1
+
+        events.append(
+            StepCompleteEvent(
+                type=StreamEventType.STEP_COMPLETE,
+                sequence=sequence,
+                emitted_at=datetime.now(UTC),
+                step="Citations resolved",
+                data={
+                    "verified": sum(
+                        1
+                        for resolution in execution.resolved_draft.resolutions
+                        if resolution.status.value == "VERIFIED"
+                    ),
+                    "unverified": sum(
+                        1
+                        for resolution in execution.resolved_draft.resolutions
+                        if resolution.status.value == "UNVERIFIED"
+                    ),
+                },
+            )
+        )
+        sequence += 1
+
+        events.append(
+            StepStartEvent(
+                type=StreamEventType.STEP_START,
+                sequence=sequence,
+                emitted_at=datetime.now(UTC),
+                step="Verifying claims...",
+            )
+        )
+        sequence += 1
+        events.append(
+            StepCompleteEvent(
+                type=StreamEventType.STEP_COMPLETE,
+                sequence=sequence,
+                emitted_at=datetime.now(UTC),
+                step="Claims verified",
+                data={
+                    "verified_claims": execution.verification_result.verified_count,
+                    "uncertain_claims": execution.verification_result.uncertain_count,
+                    "unsupported_claims": execution.verification_result.unsupported_count,
+                    "overall_status": execution.structured_answer.overall_status.value,
+                },
+            )
+        )
+        sequence += 1
+
+        for token in self._chunk_tokens(execution.resolved_draft.rendered_text):
+            events.append(
+                TokenEvent(
+                    type=StreamEventType.TOKEN,
+                    sequence=sequence,
+                    emitted_at=datetime.now(UTC),
+                    token=token,
+                )
+            )
+            sequence += 1
+
+        confidence_denominator = max(len(execution.verification_result.claims), 1)
+        confidence = execution.verification_result.verified_count / confidence_denominator
+        events.append(
+            CompleteEvent(
+                type=StreamEventType.COMPLETE,
+                sequence=sequence,
+                emitted_at=datetime.now(UTC),
+                confidence=confidence,
+                metrics={
+                    "mode": "verified_query_execution",
+                    "pipeline": execution.pipeline,
+                    "query_type": execution.analysis.query_type.value,
+                    "crag_action": execution.crag_result.action.value,
+                    "result_count": len(execution.crag_result.results),
+                    "verified_claims": execution.verification_result.verified_count,
+                    "uncertain_claims": execution.verification_result.uncertain_count,
+                    "unsupported_claims": execution.verification_result.unsupported_count,
+                    "overall_status": execution.structured_answer.overall_status.value,
+                    "event_count": sequence,
                 },
             )
         )
