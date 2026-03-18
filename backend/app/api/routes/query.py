@@ -11,7 +11,7 @@ router = APIRouter(tags=["query"])
 
 @router.post("/query", status_code=status.HTTP_202_ACCEPTED, response_model=QueryAcceptedResponse)
 def submit_query(request: QuerySubmissionRequest) -> QueryAcceptedResponse:
-    record = query_runtime.create_query(request.query)
+    record = query_runtime.create_query(request.query, workspace_id=request.workspace_id)
     return QueryAcceptedResponse(data=query_runtime.build_acceptance(record))
 
 
