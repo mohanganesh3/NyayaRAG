@@ -114,7 +114,10 @@ def test_upload_ingestion_processes_scanned_pdf_via_ocr() -> None:
         ocr_engine=FakeOcrEngine(
             {
                 ("fir-scan.pdf", 1): OcrExtraction(
-                    text="FIR dated 17 March 2026 under BNS 101 and BNS 103.",
+                    text=(
+                        "FIR dated 17 March 2026 under A1R 1978 SC 597. "
+                        "The petltloner sought u/s 438 crpc relief."
+                    ),
                     confidence=0.88,
                     engine_name="fake-ocr",
                 )
@@ -130,8 +133,12 @@ def test_upload_ingestion_processes_scanned_pdf_via_ocr() -> None:
     assert result.document_mode is UploadDocumentMode.SCANNED_PDF
     assert result.extraction_method == "ocr_pdf"
     assert result.pages[0].classification is UploadPageClassification.SCANNED_PDF
-    assert "BNS 101" in result.extracted_text
+    assert result.raw_extracted_text.startswith("FIR dated 17 March 2026 under A1R")
+    assert "AIR 1978 SC 597" in result.extracted_text
+    assert "Section 438 CrPC" in result.extracted_text
     assert result.confidence >= 0.88
+    assert result.normalized_citations == ["AIR 1978 SC 597"]
+    assert result.normalized_sections == ["Section 438 CrPC"]
 
 
 def test_upload_ingestion_processes_image_via_ocr() -> None:

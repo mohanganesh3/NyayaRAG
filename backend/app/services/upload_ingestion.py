@@ -8,6 +8,7 @@ from typing import Protocol
 from xml.etree import ElementTree
 from zipfile import ZipFile
 
+from app.services.ocr_cleanup import LegalTextNormalizer, NormalizedPartyCluster
 from pypdf import PdfReader
 
 
@@ -55,9 +56,14 @@ class ProcessedUploadPage:
     page_number: int
     classification: UploadPageClassification
     extraction_method: str
+    raw_text: str
     text: str
     confidence: float
     character_count: int
+    normalized_citations: list[str]
+    normalized_sections: list[str]
+    normalized_parties: list[NormalizedPartyCluster]
+    corrections_applied: list[str]
 
 
 @dataclass(slots=True)
@@ -69,8 +75,12 @@ class ProcessedUploadDocument:
     extraction_method: str
     page_count: int
     pages: list[ProcessedUploadPage]
+    raw_extracted_text: str
     extracted_text: str
     confidence: float
+    normalized_citations: list[str]
+    normalized_sections: list[str]
+    normalized_parties: list[NormalizedPartyCluster]
 
 
 class NullOcrEngine:
@@ -90,9 +100,11 @@ class UploadIngestionService:
         self,
         *,
         ocr_engine: OcrEngine | None = None,
+        text_normalizer: LegalTextNormalizer | None = None,
         typed_pdf_text_threshold: int = 24,
     ) -> None:
         self._ocr_engine = ocr_engine or NullOcrEngine()
+        self._text_normalizer = text_normalizer or LegalTextNormalizer()
         self._typed_pdf_text_threshold = typed_pdf_text_threshold
 
     def process_upload(
@@ -140,13 +152,12 @@ class UploadIngestionService:
             if len(extracted_text) >= self._typed_pdf_text_threshold:
                 confidence = self._text_confidence(extracted_text, baseline=0.72)
                 pages.append(
-                    ProcessedUploadPage(
+                    self._build_page(
                         page_number=page_number,
                         classification=UploadPageClassification.TYPED_PDF,
                         extraction_method="pdf_text",
-                        text=extracted_text,
+                        raw_text=extracted_text,
                         confidence=confidence,
-                        character_count=len(extracted_text),
                     )
                 )
                 continue
@@ -159,17 +170,17 @@ class UploadIngestionService:
             )
             ocr_text = self._normalize_text(ocr_result.text)
             pages.append(
-                ProcessedUploadPage(
+                self._build_page(
                     page_number=page_number,
                     classification=UploadPageClassification.SCANNED_PDF,
                     extraction_method=f"ocr:{ocr_result.engine_name}",
-                    text=ocr_text,
+                    raw_text=ocr_text,
                     confidence=self._ocr_confidence(ocr_result.confidence, ocr_text),
-                    character_count=len(ocr_text),
                 )
             )
 
         extracted_text = "\n".join(page.text for page in pages if page.text)
+        raw_extracted_text = "\n".join(page.raw_text for page in pages if page.raw_text)
         confidence = round(sum(page.confidence for page in pages) / max(len(pages), 1), 3)
         document_mode = self._classify_pdf_document_mode(pages)
         extraction_method = {
@@ -186,8 +197,12 @@ class UploadIngestionService:
             extraction_method=extraction_method,
             page_count=len(pages),
             pages=pages,
+            raw_extracted_text=raw_extracted_text,
             extracted_text=extracted_text,
             confidence=confidence,
+            normalized_citations=self._merge_page_list(pages, "normalized_citations"),
+            normalized_sections=self._merge_page_list(pages, "normalized_sections"),
+            normalized_parties=self._merge_parties(pages),
         )
 
     def _process_image(
@@ -204,13 +219,12 @@ class UploadIngestionService:
             page_number=1,
         )
         text = self._normalize_text(ocr_result.text)
-        page = ProcessedUploadPage(
+        page = self._build_page(
             page_number=1,
             classification=UploadPageClassification.IMAGE_OCR,
             extraction_method=f"ocr:{ocr_result.engine_name}",
-            text=text,
+            raw_text=text,
             confidence=self._ocr_confidence(ocr_result.confidence, text),
-            character_count=len(text),
         )
         return ProcessedUploadDocument(
             file_name=file_name,
@@ -220,8 +234,12 @@ class UploadIngestionService:
             extraction_method=page.extraction_method,
             page_count=1,
             pages=[page],
-            extracted_text=text,
+            raw_extracted_text=page.raw_text,
+            extracted_text=page.text,
             confidence=page.confidence,
+            normalized_citations=page.normalized_citations,
+            normalized_sections=page.normalized_sections,
+            normalized_parties=page.normalized_parties,
         )
 
     def _process_docx(
@@ -233,13 +251,12 @@ class UploadIngestionService:
     ) -> ProcessedUploadDocument:
         text = self._normalize_text(self._extract_docx_text(content))
         confidence = self._text_confidence(text, baseline=0.75)
-        page = ProcessedUploadPage(
+        page = self._build_page(
             page_number=1,
             classification=UploadPageClassification.DOCX_TEXT,
             extraction_method="docx_xml",
-            text=text,
+            raw_text=text,
             confidence=confidence,
-            character_count=len(text),
         )
         return ProcessedUploadDocument(
             file_name=file_name,
@@ -249,8 +266,12 @@ class UploadIngestionService:
             extraction_method=page.extraction_method,
             page_count=1,
             pages=[page],
-            extracted_text=text,
+            raw_extracted_text=page.raw_text,
+            extracted_text=page.text,
             confidence=confidence,
+            normalized_citations=page.normalized_citations,
+            normalized_sections=page.normalized_sections,
+            normalized_parties=page.normalized_parties,
         )
 
     def _infer_file_kind(self, file_name: str, media_type: str) -> UploadedFileKind:
@@ -306,6 +327,50 @@ class UploadIngestionService:
 
     def _normalize_text(self, text: str) -> str:
         return " ".join(text.split())
+
+    def _build_page(
+        self,
+        *,
+        page_number: int,
+        classification: UploadPageClassification,
+        extraction_method: str,
+        raw_text: str,
+        confidence: float,
+    ) -> ProcessedUploadPage:
+        normalized = self._text_normalizer.normalize(raw_text)
+        return ProcessedUploadPage(
+            page_number=page_number,
+            classification=classification,
+            extraction_method=extraction_method,
+            raw_text=normalized.raw_text,
+            text=normalized.normalized_text,
+            confidence=confidence,
+            character_count=len(normalized.normalized_text),
+            normalized_citations=list(normalized.normalized_citations),
+            normalized_sections=list(normalized.normalized_sections),
+            normalized_parties=list(normalized.normalized_parties),
+            corrections_applied=list(normalized.corrections_applied),
+        )
+
+    def _merge_page_list(self, pages: list[ProcessedUploadPage], field_name: str) -> list[str]:
+        values: list[str] = []
+        seen: set[str] = set()
+        for page in pages:
+            for value in getattr(page, field_name):
+                if value not in seen:
+                    seen.add(value)
+                    values.append(value)
+        return values
+
+    def _merge_parties(self, pages: list[ProcessedUploadPage]) -> list[NormalizedPartyCluster]:
+        clusters: list[NormalizedPartyCluster] = []
+        seen: set[str] = set()
+        for page in pages:
+            for cluster in page.normalized_parties:
+                if cluster.canonical_name not in seen:
+                    seen.add(cluster.canonical_name)
+                    clusters.append(cluster)
+        return clusters
 
     def _text_confidence(self, text: str, *, baseline: float) -> float:
         if not text:
