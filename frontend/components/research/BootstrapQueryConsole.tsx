@@ -20,7 +20,19 @@ import {
 const apiBaseUrl =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
 
-export function BootstrapQueryConsole() {
+type BootstrapQueryConsoleProps = {
+  buttonLabel?: string;
+  description?: string;
+  heading?: string;
+  sectionLabel?: string;
+};
+
+export function BootstrapQueryConsole({
+  buttonLabel = "Run Stream Demo",
+  description = "This dummy query proves the Phase 0 streaming contract: submit a query, receive typed SSE events, and render process steps plus token output on the client.",
+  heading = "Observe the verification path before the answer lands.",
+  sectionLabel = "Streaming Contract Preview",
+}: BootstrapQueryConsoleProps = {}) {
   const [state, dispatch] = useReducer(
     applyQueryStreamEvent,
     undefined,
@@ -84,14 +96,12 @@ export function BootstrapQueryConsole() {
     <SurfaceCard className="p-6 sm:p-7" tone="paper">
       <div className="flex flex-col gap-5 xl:flex-row xl:items-end xl:justify-between">
         <div className="space-y-3">
-          <SectionLabel>Streaming Contract Preview</SectionLabel>
+          <SectionLabel>{sectionLabel}</SectionLabel>
           <h2 className="max-w-3xl text-3xl leading-[1.02] text-ink-950">
-            Observe the verification path before the answer lands.
+            {heading}
           </h2>
           <p className="max-w-2xl text-sm leading-7 text-ink-700">
-            This dummy query proves the Phase 0 streaming contract: submit a
-            query, receive typed SSE events, and render process steps plus token
-            output on the client.
+            {description}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
@@ -102,7 +112,7 @@ export function BootstrapQueryConsole() {
             onClick={() => void runStreamDemo()}
             type="button"
           >
-            Run Stream Demo
+            {buttonLabel}
           </button>
         </div>
       </div>
