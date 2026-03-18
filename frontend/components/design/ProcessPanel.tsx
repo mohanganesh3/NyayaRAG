@@ -32,7 +32,7 @@ export function ProcessPanel({
 
       <div className="mt-5 space-y-4 font-mono text-sm">
         {steps.length === 0 ? (
-          <p className="text-paper-100/72">{emptyMessage}</p>
+          <p className="text-[rgba(244,236,221,0.72)]">{emptyMessage}</p>
         ) : null}
 
         {steps.map((step) => (
