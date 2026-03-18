@@ -239,6 +239,14 @@ export default function HomePage() {
                 value="Homepage proof -> workspace proof -> filing trust"
               />
             </div>
+            <div className="mt-4">
+              <Link
+                className="rounded-full border border-[rgba(16,32,53,0.1)] bg-white/78 px-5 py-3 text-sm font-semibold text-ink-950 shadow-card transition hover:-translate-y-0.5 hover:border-[rgba(171,127,40,0.28)]"
+                href="/launch"
+              >
+                Open launch assets
+              </Link>
+            </div>
           </SurfaceCard>
         </div>
 

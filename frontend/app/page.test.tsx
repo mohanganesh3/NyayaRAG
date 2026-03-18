@@ -22,5 +22,6 @@ describe("HomePage", () => {
       screen.getByRole("link", { name: /Manage plans and billing/i }),
     ).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Open full trust page/i })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Open launch assets/i })).toBeInTheDocument();
   });
 });
