@@ -1,3 +1,7 @@
+"use client";
+
+import { useState } from "react";
+
 import { BootstrapQueryConsole } from "../research/BootstrapQueryConsole";
 import {
   CitationBadge,
@@ -5,7 +9,13 @@ import {
   SectionLabel,
   SurfaceCard,
 } from "../design";
+import {
+  collectStructuredAnswerSources,
+  demoStructuredAnswer,
+  type StructuredAnswerSource,
+} from "../../lib/structured-answer";
 import type { WorkspaceCaseContext } from "../../lib/workspace";
+import { StructuredAnswerRenderer } from "./StructuredAnswerRenderer";
 
 type WorkspaceShellProps = {
   context: WorkspaceCaseContext;
@@ -16,18 +26,6 @@ const suggestedQueries = [
   "Which Supreme Court authorities support treating this as a civil dispute?",
   "What weaknesses will the prosecution press in reply?",
 ];
-
-const sourceViewerPreview = {
-  citation: "Siddharam Satlingappa Mhetre v State of Maharashtra, (2011) 1 SCC 694",
-  court: "Supreme Court of India",
-  note: "Binding anticipatory bail authority",
-  excerpt:
-    "Personal liberty under Article 21 requires courts to apply anticipatory bail principles with care, especially where custody is sought without concrete investigative necessity.",
-  linkedAuthorities: [
-    "Arnesh Kumar v State of Bihar, (2014) 8 SCC 273",
-    "Gurbaksh Singh Sibbia v State of Punjab, (1980) 2 SCC 565",
-  ],
-};
 
 function toTitleCase(value: string | null): string {
   if (!value) {
@@ -43,6 +41,22 @@ function toTitleCase(value: string | null): string {
 export function WorkspaceShell({ context }: WorkspaceShellProps) {
   const defaultWorkspaceQuery =
     "What are the strongest anticipatory bail arguments on these facts, and which binding Supreme Court cases should appear first in the note?";
+  const availableSources = collectStructuredAnswerSources(demoStructuredAnswer);
+  const [activeSourceId, setActiveSourceId] = useState<string | null>(
+    availableSources[0]?.id ?? null,
+  );
+
+  const activeSource =
+    availableSources.find((source) => source.id === activeSourceId) ??
+    availableSources[0] ??
+    null;
+  const relatedSources = availableSources.filter(
+    (source) => source.id !== activeSource?.id,
+  );
+
+  function handleSelectSource(source: StructuredAnswerSource) {
+    setActiveSourceId(source.id);
+  }
 
   return (
     <div className="grid gap-4 xl:grid-cols-[19rem_minmax(0,1fr)_20rem] xl:items-start">
@@ -181,6 +195,12 @@ export function WorkspaceShell({ context }: WorkspaceShellProps) {
           suggestedQueries={suggestedQueries}
         />
 
+        <StructuredAnswerRenderer
+          activeSourceId={activeSourceId}
+          answer={demoStructuredAnswer}
+          onSelectSource={handleSelectSource}
+        />
+
         <SurfaceCard className="p-5" tone="muted">
           <div className="grid gap-4 lg:grid-cols-2">
             <div>
@@ -243,14 +263,27 @@ export function WorkspaceShell({ context }: WorkspaceShellProps) {
 
           <div className="mt-5 rounded-[1.2rem] border border-[rgba(244,236,221,0.12)] bg-[rgba(252,247,239,0.06)] p-4">
             <p className="font-serif text-xl text-paper-50">
-              {sourceViewerPreview.citation}
+              {activeSource?.citation ?? "No source selected yet."}
             </p>
             <div className="mt-3 flex flex-wrap gap-2">
-              <CitationBadge tone="verified">Verified</CitationBadge>
-              <CitationBadge tone="binding">{sourceViewerPreview.court}</CitationBadge>
+              <CitationBadge
+                tone={
+                  activeSource?.status === "VERIFIED"
+                    ? "verified"
+                    : activeSource?.status === "UNCERTAIN"
+                      ? "uncertain"
+                      : "unverified"
+                }
+              >
+                {activeSource?.status ?? "UNVERIFIED"}
+              </CitationBadge>
+              {activeSource?.docId ? (
+                <CitationBadge tone="binding">{activeSource.docId}</CitationBadge>
+              ) : null}
             </div>
             <p className="mt-3 text-sm leading-7 text-[rgba(252,247,239,0.78)]">
-              {sourceViewerPreview.note}
+              {activeSource?.message ??
+                "Select an inline citation badge from the answer to inspect the supporting source."}
             </p>
           </div>
 
@@ -259,21 +292,38 @@ export function WorkspaceShell({ context }: WorkspaceShellProps) {
               Relevant passage
             </p>
             <p className="mt-3 text-sm leading-7 text-[rgba(252,247,239,0.84)]">
-              {sourceViewerPreview.excerpt}
+              {activeSource?.sourcePassage ??
+                "No source passage is active yet."}
             </p>
           </div>
 
+          {activeSource?.appealWarning ? (
+            <div className="mt-4 rounded-[1rem] border border-[rgba(152,80,77,0.24)] bg-[rgba(152,80,77,0.08)] p-4">
+              <p className="font-mono text-xs uppercase tracking-[0.2em] text-[rgba(242,177,172,0.72)]">
+                Appeal warning
+              </p>
+              <p className="mt-3 text-sm leading-7 text-[rgba(252,247,239,0.82)]">
+                {activeSource.appealWarning}
+              </p>
+            </div>
+          ) : null}
+
           <div className="mt-5">
             <p className="font-mono text-xs uppercase tracking-[0.2em] text-[rgba(244,236,221,0.6)]">
-              Linked authorities
+              Also cited in answer
             </p>
             <ul className="mt-3 space-y-3 text-sm leading-7 text-[rgba(252,247,239,0.82)]">
-              {sourceViewerPreview.linkedAuthorities.map((authority) => (
-                <li
-                  className="rounded-[1rem] border border-[rgba(244,236,221,0.12)] bg-[rgba(252,247,239,0.04)] px-3 py-3"
-                  key={authority}
-                >
-                  {authority}
+              {relatedSources.slice(0, 3).map((source) => (
+                <li key={source.id}>
+                  <button
+                    className="w-full rounded-[1rem] border border-[rgba(244,236,221,0.12)] bg-[rgba(252,247,239,0.04)] px-3 py-3 text-left transition hover:border-[rgba(207,177,112,0.32)]"
+                    onClick={() => {
+                      handleSelectSource(source);
+                    }}
+                    type="button"
+                  >
+                    {source.label}
+                  </button>
                 </li>
               ))}
             </ul>

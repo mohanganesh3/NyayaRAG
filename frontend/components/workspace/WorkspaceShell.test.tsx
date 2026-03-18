@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 
 import { demoWorkspaceContext } from "../../lib/workspace";
 import { WorkspaceShell } from "./WorkspaceShell";
@@ -12,7 +12,21 @@ describe("WorkspaceShell", () => {
     expect(screen.getByText(/Uploaded documents/i)).toBeInTheDocument();
     expect(screen.getByText(/Live research display/i)).toBeInTheDocument();
     expect(
-      screen.getByText(/Siddharam Satlingappa Mhetre v State of Maharashtra/i),
+      screen.getByText(
+        /Personal liberty requires the court to examine whether the prosecution has shown concrete investigative necessity before permitting arrest in anticipatory bail matters\./i,
+      ),
+    ).toBeInTheDocument();
+
+    fireEvent.click(
+      screen.getAllByRole("button", {
+        name: /Arnesh Kumar/i,
+      })[0],
+    );
+
+    expect(
+      screen.getByText(
+        /Arrest cannot be routine, and the investigating officer must justify why custody is necessary on the facts of the case\./i,
+      ),
     ).toBeInTheDocument();
   });
 });
