@@ -4,6 +4,8 @@ import { useState } from "react";
 
 import { BootstrapQueryConsole } from "../research/BootstrapQueryConsole";
 import { createInitialQueryStreamState } from "../../lib/query-stream";
+import type { FrontendAuthSession } from "../../lib/auth-session";
+import type { WorkspaceQueryHistoryPreview } from "../../lib/query-history";
 import {
   CitationBadge,
   MetricPill,
@@ -21,7 +23,10 @@ import { StructuredAnswerRenderer } from "./StructuredAnswerRenderer";
 import { TransparencyDrawer } from "./TransparencyDrawer";
 
 type WorkspaceShellProps = {
+  authHeaders: Record<string, string>;
+  authSession: FrontendAuthSession;
   context: WorkspaceCaseContext;
+  queryHistory: WorkspaceQueryHistoryPreview[];
 };
 
 const suggestedQueries = [
@@ -41,7 +46,12 @@ function toTitleCase(value: string | null): string {
     .join(" ");
 }
 
-export function WorkspaceShell({ context }: WorkspaceShellProps) {
+export function WorkspaceShell({
+  authHeaders,
+  authSession,
+  context,
+  queryHistory,
+}: WorkspaceShellProps) {
   const defaultWorkspaceQuery =
     "What are the strongest anticipatory bail arguments on these facts, and which binding Supreme Court cases should appear first in the note?";
   const availableSources = collectStructuredAnswerSources(demoStructuredAnswer);
@@ -79,6 +89,15 @@ export function WorkspaceShell({ context }: WorkspaceShellProps) {
             {context.case_number} · {context.court}
           </p>
 
+          <div className="mt-4 flex flex-wrap gap-2">
+            <CitationBadge tone="binding">Protected workspace</CitationBadge>
+            <CitationBadge
+              tone={authSession.isAuthenticated ? "verified" : "unverified"}
+            >
+              {authSession.isAuthenticated ? "Authenticated" : "Sign-in required"}
+            </CitationBadge>
+          </div>
+
           <div className="mt-5 grid gap-3">
             <MetricPill
               className="w-full"
@@ -97,6 +116,12 @@ export function WorkspaceShell({ context }: WorkspaceShellProps) {
               label="Extraction confidence"
               tone="teal"
               value={`${Math.round(context.doc_extraction_confidence * 100)}%`}
+            />
+            <MetricPill
+              className="w-full"
+              label="Session"
+              tone="ink"
+              value={authSession.userId ?? "Not signed in"}
             />
           </div>
 
@@ -144,6 +169,48 @@ export function WorkspaceShell({ context }: WorkspaceShellProps) {
                 ))}
               </div>
             </div>
+          </div>
+        </SurfaceCard>
+
+        <SurfaceCard className="p-5" tone="paper">
+          <SectionLabel>Session history</SectionLabel>
+          <div className="mt-4 space-y-3">
+            {queryHistory.length === 0 ? (
+              <p className="rounded-[1rem] border border-[rgba(16,32,53,0.08)] bg-white/72 px-3 py-3 text-sm leading-7 text-ink-700">
+                Sign in through the protected session bridge to persist
+                workspace history across runs.
+              </p>
+            ) : (
+              queryHistory.map((entry) => (
+                <div
+                  className="rounded-[1rem] border border-[rgba(16,32,53,0.08)] bg-white/72 px-3 py-3"
+                  key={`${entry.createdAt}-${entry.query}`}
+                >
+                  <div className="flex flex-wrap items-center gap-2">
+                    <CitationBadge
+                      tone={
+                        entry.status === "completed"
+                          ? "verified"
+                          : entry.status === "running"
+                            ? "persuasive"
+                            : "unverified"
+                      }
+                    >
+                      {entry.status}
+                    </CitationBadge>
+                    <span className="font-mono text-[0.68rem] uppercase tracking-[0.18em] text-ink-700">
+                      {entry.pipeline}
+                    </span>
+                  </div>
+                  <p className="mt-3 text-sm font-semibold leading-7 text-ink-950">
+                    {entry.query}
+                  </p>
+                  <p className="mt-2 text-xs uppercase tracking-[0.16em] text-ink-700">
+                    {entry.createdAt}
+                  </p>
+                </div>
+              ))
+            )}
           </div>
         </SurfaceCard>
 
@@ -218,6 +285,7 @@ export function WorkspaceShell({ context }: WorkspaceShellProps) {
           suggestedQueries={suggestedQueries}
           workspaceId={context.case_id}
           onStateChange={setStreamState}
+          requestHeaders={authHeaders}
         />
 
         <StructuredAnswerRenderer

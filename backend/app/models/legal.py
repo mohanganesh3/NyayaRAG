@@ -381,6 +381,9 @@ class CaseContext(TimestampMixin, Base):
     __tablename__ = "case_contexts"
 
     case_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    owner_auth_user_id: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    owner_display_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    auth_provider: Mapped[str | None] = mapped_column(String(50), nullable=True)
     appellant_petitioner: Mapped[str | None] = mapped_column(String(255), nullable=True)
     respondent_opposite_party: Mapped[str | None] = mapped_column(String(255), nullable=True)
     advocates: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)

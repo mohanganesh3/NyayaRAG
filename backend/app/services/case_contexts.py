@@ -97,12 +97,18 @@ class CaseContextBuilder:
         case_id: str | None = None,
         court: str | None = None,
         case_number: str | None = None,
+        owner_auth_user_id: str | None = None,
+        owner_display_name: str | None = None,
+        auth_provider: str | None = None,
     ) -> CaseContext:
         if not processed_documents:
             raise ValueError("At least one processed upload document is required.")
 
         existing = session.get(CaseContext, case_id) if case_id else None
         context = existing or CaseContext(case_id=case_id or str(uuid4()))
+        context.owner_auth_user_id = owner_auth_user_id
+        context.owner_display_name = owner_display_name
+        context.auth_provider = auth_provider
 
         combined_text = "\n".join(document.extracted_text for document in processed_documents)
         extracted_sections = self._extract_canonical_sections(processed_documents)

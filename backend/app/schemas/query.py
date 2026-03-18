@@ -3,7 +3,7 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class QueryType(StrEnum):
@@ -92,3 +92,26 @@ class QueryAcceptedData(BaseModel):
 class QueryAcceptedResponse(BaseModel):
     success: Literal[True] = True
     data: QueryAcceptedData
+
+
+class QueryHistoryEntryRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    query_id: str
+    auth_user_id: str | None = None
+    auth_session_id: str | None = None
+    auth_provider: str | None = None
+    workspace_id: str | None = None
+    query_text: str
+    pipeline: str | None = None
+    status: str
+    answer_preview: str | None = None
+    error_message: str | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class QueryHistoryResponse(BaseModel):
+    success: Literal[True] = True
+    data: list[QueryHistoryEntryRead]

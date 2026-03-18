@@ -80,7 +80,12 @@ def _seed_criminal_mappings(session: Session) -> None:
     )
 
 
-def _build_case_context(session: Session, *, case_id: str) -> str:
+def _build_case_context(
+    session: Session,
+    *,
+    case_id: str,
+    owner_auth_user_id: str,
+) -> str:
     _seed_criminal_mappings(session)
 
     upload_service = UploadIngestionService(
@@ -123,6 +128,9 @@ def _build_case_context(session: Session, *, case_id: str) -> str:
         session,
         processed_documents=[fir_document, bail_document],
         case_id=case_id,
+        owner_auth_user_id=owner_auth_user_id,
+        owner_display_name="Mohan Ganesh",
+        auth_provider="clerk",
     )
     session.commit()
     return context.case_id
@@ -135,7 +143,11 @@ def test_case_context_builder_persists_and_routes_uploaded_context(tmp_path) -> 
     builder = CaseContextBuilder()
 
     with Session(engine) as session:
-        case_id = _build_case_context(session, case_id="case-bail-001")
+        case_id = _build_case_context(
+            session,
+            case_id="case-bail-001",
+            owner_auth_user_id="clerk-user-1",
+        )
         session.expire_all()
 
         context = builder.get(session, case_id)
@@ -173,7 +185,11 @@ def test_workspace_route_returns_persisted_case_context(tmp_path) -> None:
     Base.metadata.create_all(engine)
 
     with Session(engine) as session:
-        case_id = _build_case_context(session, case_id="case-bail-002")
+        case_id = _build_case_context(
+            session,
+            case_id="case-bail-002",
+            owner_auth_user_id="clerk-user-1",
+        )
 
     def override_get_db():
         with Session(engine) as session:
@@ -182,7 +198,10 @@ def test_workspace_route_returns_persisted_case_context(tmp_path) -> None:
     app.dependency_overrides[get_db] = override_get_db
     try:
         client = TestClient(app)
-        response = client.get(f"/api/workspace/{case_id}")
+        response = client.get(
+            f"/api/workspace/{case_id}",
+            headers={"X-Clerk-User-Id": "clerk-user-1"},
+        )
     finally:
         app.dependency_overrides.clear()
         engine.dispose()
@@ -206,7 +225,10 @@ def test_workspace_route_returns_not_found_for_missing_case_context(tmp_path) ->
     app.dependency_overrides[get_db] = override_get_db
     try:
         client = TestClient(app)
-        response = client.get("/api/workspace/missing-case")
+        response = client.get(
+            "/api/workspace/missing-case",
+            headers={"X-Clerk-User-Id": "clerk-user-1"},
+        )
     finally:
         app.dependency_overrides.clear()
         engine.dispose()

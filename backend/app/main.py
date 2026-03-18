@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from app.api.errors import register_exception_handlers
+from app.api.routes.auth import router as auth_router
 from app.api.routes.health import router as health_router
 from app.api.routes.query import router as query_router
 from app.api.routes.trust import router as trust_router
@@ -31,6 +32,7 @@ app = FastAPI(
 )
 
 register_exception_handlers(app)
+app.include_router(auth_router, prefix="/api")
 app.include_router(health_router, prefix="/api")
 app.include_router(query_router, prefix="/api")
 app.include_router(trust_router, prefix="/api")

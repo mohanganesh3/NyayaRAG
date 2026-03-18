@@ -22,7 +22,7 @@ from app.models.legal import (
     ValidityStatus,
 )
 from app.models.provenance import IngestionRun, IngestionRunStatus, SourceRegistry, SourceType
-from app.models.system import BackgroundTaskRun, RuntimeSetting
+from app.models.system import BackgroundTaskRun, QueryHistoryEntry, RuntimeSetting
 from app.models.vector_store import (
     VectorDistanceMetric,
     VectorStoreBackend,
@@ -47,6 +47,7 @@ __all__ = [
     "EvaluationRun",
     "LegalDocument",
     "LegalDocumentType",
+    "QueryHistoryEntry",
     "IngestionRun",
     "IngestionRunStatus",
     "RuntimeSetting",

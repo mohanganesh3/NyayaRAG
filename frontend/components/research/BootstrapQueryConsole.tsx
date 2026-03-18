@@ -33,6 +33,7 @@ type BootstrapQueryConsoleProps = {
   suggestedQueries?: string[];
   workspaceId?: string;
   onStateChange?: (state: QueryStreamState) => void;
+  requestHeaders?: Record<string, string>;
 };
 
 export function BootstrapQueryConsole({
@@ -46,6 +47,7 @@ export function BootstrapQueryConsole({
   suggestedQueries = [],
   workspaceId,
   onStateChange,
+  requestHeaders,
 }: BootstrapQueryConsoleProps = {}) {
   const [state, dispatch] = useReducer(
     (
@@ -88,6 +90,7 @@ export function BootstrapQueryConsole({
       method: "POST",
       headers: {
         "Content-Type": "application/json",
+        ...requestHeaders,
       },
       body: JSON.stringify(
         workspaceId

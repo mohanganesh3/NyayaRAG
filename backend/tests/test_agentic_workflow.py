@@ -1,15 +1,21 @@
 import json
 
+from app.db.base import Base
+from app.db.session import build_engine, get_db
 from app.main import app
 from app.models import CaseContext, CaseStage, CaseType
 from app.services.agentic_workflow import LangGraphAgenticWorkflow
 from app.services.query_runtime import query_runtime
 from fastapi.testclient import TestClient
+from sqlalchemy.orm import Session, sessionmaker
 
 
 def _build_case_context() -> CaseContext:
     return CaseContext(
         case_id="case-agentic-001",
+        owner_auth_user_id="clerk-user-1",
+        owner_display_name="Mohan Ganesh",
+        auth_provider="clerk",
         appellant_petitioner="Arjun Rao",
         respondent_opposite_party="State of Maharashtra",
         advocates=["Meera Rao"],
@@ -69,22 +75,42 @@ def test_langgraph_agentic_workflow_runs_with_sqlite_checkpointer(tmp_path) -> N
     ]
 
 
-def test_workspace_query_stream_uses_agentic_path_and_emits_agent_logs() -> None:
+def test_workspace_query_stream_uses_agentic_path_and_emits_agent_logs(tmp_path) -> None:
     query_runtime.reset()
+    engine = build_engine(f"sqlite+pysqlite:///{tmp_path / 'agentic_query_stream.db'}")
+    Base.metadata.create_all(engine)
+    session_factory = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
+
+    with Session(engine) as session:
+        session.add(_build_case_context())
+        session.commit()
+
+    def override_get_db():
+        with Session(engine) as session:
+            yield session
+
     query_runtime.set_workspace_loader(lambda _: _build_case_context())
+    query_runtime.set_session_factory_provider(lambda: session_factory)
+    app.dependency_overrides[get_db] = override_get_db
     client = TestClient(app)
 
     try:
         accepted = client.post(
             "/api/query",
             json={"query": "What are my bail arguments?", "workspace_id": "case-agentic-001"},
+            headers={"X-Clerk-User-Id": "clerk-user-1"},
         )
         assert accepted.status_code == 202
 
         stream_url = accepted.json()["data"]["stream_url"]
-        response = client.get(stream_url)
+        response = client.get(
+            stream_url,
+            headers={"X-Clerk-User-Id": "clerk-user-1"},
+        )
     finally:
         query_runtime.reset()
+        app.dependency_overrides.clear()
+        engine.dispose()
 
     assert response.status_code == 200
     payloads = [

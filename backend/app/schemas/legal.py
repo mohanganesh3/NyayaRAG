@@ -153,6 +153,9 @@ class CaseContextRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     case_id: str
+    owner_auth_user_id: str | None = None
+    owner_display_name: str | None = None
+    auth_provider: str | None = None
     appellant_petitioner: str | None = None
     respondent_opposite_party: str | None = None
     advocates: list[str]

@@ -2,9 +2,21 @@ import Link from "next/link";
 
 import { SectionLabel } from "../../components/design";
 import { WorkspaceShell } from "../../components/workspace/WorkspaceShell";
+import {
+  buildFrontendAuthHeaders,
+  resolveFrontendAuthSession,
+} from "../../lib/auth-session";
+import { demoQueryHistoryForSession } from "../../lib/query-history";
 import { demoWorkspaceContext } from "../../lib/workspace";
 
 export default function WorkspacePage() {
+  const authSession = resolveFrontendAuthSession();
+  const authHeaders = buildFrontendAuthHeaders(authSession);
+  const queryHistory = demoQueryHistoryForSession(
+    authSession,
+    demoWorkspaceContext.case_id,
+  );
+
   return (
     <main className="min-h-screen text-ink-900">
       <section className="page-shell flex flex-col gap-8">
@@ -15,8 +27,8 @@ export default function WorkspacePage() {
               Three panels, one legal research flow.
             </h1>
             <p className="max-w-3xl text-sm leading-7 text-ink-700">
-              This route is the product shell: case context on the left,
-              research flow in the center, source evidence on the right.
+              This route is the protected product shell: case context on the
+              left, research flow in the center, source evidence on the right.
             </p>
           </div>
 
@@ -28,7 +40,12 @@ export default function WorkspacePage() {
           </Link>
         </div>
 
-        <WorkspaceShell context={demoWorkspaceContext} />
+        <WorkspaceShell
+          authHeaders={authHeaders}
+          authSession={authSession}
+          context={demoWorkspaceContext}
+          queryHistory={queryHistory}
+        />
       </section>
     </main>
   );

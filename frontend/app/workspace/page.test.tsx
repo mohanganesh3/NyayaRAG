@@ -14,6 +14,8 @@ describe("WorkspacePage", () => {
     expect(screen.getByText(/Uploaded documents/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/Query input/i)).toBeInTheDocument();
     expect(screen.getByText(/Relevant passage/i)).toBeInTheDocument();
+    expect(screen.getByText(/Protected workspace/i)).toBeInTheDocument();
+    expect(screen.getByText(/Session history/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Start Research/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Open transparency log/i })).toBeInTheDocument();
     expect(screen.getByText(/Verification Status/i)).toBeInTheDocument();

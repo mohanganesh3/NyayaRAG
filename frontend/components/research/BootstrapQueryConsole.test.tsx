@@ -55,6 +55,7 @@ describe("BootstrapQueryConsole", () => {
           "What are the strongest anticipatory bail arguments?",
           "Which Supreme Court case should lead the note?",
         ]}
+        requestHeaders={{ "X-Nyayarag-Dev-User-Id": "dev-advocate" }}
         workspaceId="demo-bail-001"
       />,
     );
@@ -68,6 +69,10 @@ describe("BootstrapQueryConsole", () => {
     expect(JSON.parse(String((global.fetch as Mock).mock.calls[0]?.[1]?.body))).toMatchObject({
       query: "What are the strongest anticipatory bail arguments?",
       workspace_id: "demo-bail-001",
+    });
+    expect((global.fetch as Mock).mock.calls[0]?.[1]?.headers).toMatchObject({
+      "Content-Type": "application/json",
+      "X-Nyayarag-Dev-User-Id": "dev-advocate",
     });
 
     const source = FakeEventSource.instances[0];

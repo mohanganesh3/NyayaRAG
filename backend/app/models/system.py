@@ -20,3 +20,17 @@ class BackgroundTaskRun(UUIDPrimaryKeyMixin, TimestampMixin, JSONPayloadMixin, B
     status: Mapped[str] = mapped_column(String(50), nullable=False, default="pending")
     result: Mapped[dict[str, object] | None] = mapped_column(JSON, nullable=True)
 
+
+class QueryHistoryEntry(UUIDPrimaryKeyMixin, TimestampMixin, JSONPayloadMixin, Base):
+    __tablename__ = "query_history_entries"
+
+    query_id: Mapped[str] = mapped_column(String(36), nullable=False, unique=True, index=True)
+    auth_user_id: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    auth_session_id: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    auth_provider: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    workspace_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    query_text: Mapped[str] = mapped_column(String(4000), nullable=False)
+    pipeline: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    status: Mapped[str] = mapped_column(String(50), nullable=False, default="accepted", index=True)
+    answer_preview: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    error_message: Mapped[str | None] = mapped_column(String(1000), nullable=True)
