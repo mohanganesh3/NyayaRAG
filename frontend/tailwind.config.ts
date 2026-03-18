@@ -5,26 +5,38 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        navy: {
-          900: "#0B1426",
-          800: "#1A2744",
+        ink: {
+          950: "var(--color-ink-950)",
+          900: "var(--color-ink-900)",
+          800: "var(--color-ink-800)",
+          700: "var(--color-ink-700)",
         },
-        cream: {
-          50: "#F8F6F0",
-          100: "#F0EDE4",
+        paper: {
+          50: "var(--color-paper-50)",
+          100: "var(--color-paper-100)",
+          200: "var(--color-paper-200)",
+          300: "var(--color-paper-300)",
         },
-        gold: {
-          400: "#C9A227",
+        brass: {
+          500: "var(--color-brass-500)",
+          300: "var(--color-brass-300)",
         },
-        text: {
-          primary: "#1A1A2E",
-          secondary: "#4A4A6A",
+        teal: {
+          500: "var(--color-teal-500)",
+          400: "var(--color-teal-400)",
+        },
+        garnet: {
+          500: "var(--color-garnet-500)",
         },
       },
       fontFamily: {
-        sans: ["Inter", "system-ui", "sans-serif"],
-        serif: ["Lora", "Georgia", "serif"],
-        mono: ["JetBrains Mono", "ui-monospace", "monospace"],
+        sans: ["var(--font-sans)", "system-ui", "sans-serif"],
+        serif: ["var(--font-serif)", "Georgia", "serif"],
+        mono: ["var(--font-mono)", "ui-monospace", "monospace"],
+      },
+      boxShadow: {
+        dossier: "var(--shadow-panel)",
+        card: "var(--shadow-card)",
       },
     },
   },
@@ -32,4 +44,3 @@ const config: Config = {
 };
 
 export default config;
-
