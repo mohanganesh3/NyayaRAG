@@ -20,6 +20,12 @@ from app.rag import (
     VerificationStatusItem,
 )
 from app.schemas.legal import CaseContextRead
+from app.services.model_runtime import (
+    JSONTaskModelClient,
+    ModelRuntimeError,
+    ModelTask,
+    build_task_model_client,
+)
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import END, START, StateGraph
@@ -200,14 +206,76 @@ class DeterministicWorkflowModel:
         ]
 
 
+class AnthropicWorkflowModel:
+    def __init__(self, client: JSONTaskModelClient) -> None:
+        self._client = client
+
+    def with_structured_output(
+        self, schema: type[StructuredOutputT]
+    ) -> StructuredOutputInvoker[StructuredOutputT]:
+        return StructuredOutputInvoker(schema, self._build_response)
+
+    def _build_response(
+        self,
+        schema: type[StructuredOutputT],
+        payload: dict[str, object],
+    ) -> StructuredOutputT:
+        if schema is not ResearchPlanDecision:
+            raise TypeError(f"Unsupported structured output schema: {schema.__name__}")
+
+        response = self._client.generate_json(
+            system_prompt="\n".join(
+                [
+                    (
+                        "You are planning an Indian legal research workflow for "
+                        "uploaded case documents."
+                    ),
+                    "Return valid JSON that matches this shape exactly:",
+                    (
+                        '{"strategy":"short strategy","questions":[{"question":"...",'
+                        '"focus":"statutory","priority":1}]}'
+                    ),
+                    (
+                        "Use concise questions grounded in the uploaded court, "
+                        "stage, sections, and open issues."
+                    ),
+                ]
+            ),
+            user_prompt=json_prompt_for_agentic_planning(payload),
+            max_tokens=1200,
+        )
+        return schema.model_validate(response)
+
+
 class LangGraphAgenticWorkflow:
-    def __init__(self, *, sqlite_path: Path | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        sqlite_path: Path | None = None,
+        planner_model_client: JSONTaskModelClient | None = None,
+        synthesis_model_client: JSONTaskModelClient | None = None,
+    ) -> None:
         self._sqlite_path = sqlite_path or (Path(gettempdir()) / "nyayarag_agentic_workflow.sqlite")
         self._sqlite_path.parent.mkdir(parents=True, exist_ok=True)
         self._connection = sqlite3.connect(self._sqlite_path, check_same_thread=False)
         self._checkpointer = SqliteSaver(self._connection)
         self._checkpointer.setup()
-        self._planner_model = DeterministicWorkflowModel()
+        resolved_planner_client = (
+            planner_model_client
+            if planner_model_client is not None
+            else build_task_model_client(ModelTask.AGENTIC_PLANNING)
+        )
+        self._planner_model = (
+            AnthropicWorkflowModel(resolved_planner_client)
+            if resolved_planner_client is not None
+            else DeterministicWorkflowModel()
+        )
+        self._deterministic_planner_model = DeterministicWorkflowModel()
+        self._synthesis_model_client = (
+            synthesis_model_client
+            if synthesis_model_client is not None
+            else build_task_model_client(ModelTask.AGENTIC_SYNTHESIS)
+        )
         self._graph = self._build_graph().compile(checkpointer=self._checkpointer)
 
     @property
@@ -318,13 +386,18 @@ class LangGraphAgenticWorkflow:
     def _research_planner_node(
         self, state: AgenticWorkflowState
     ) -> dict[str, object]:
-        planner = self._planner_model.with_structured_output(ResearchPlanDecision)
-        decision = planner.invoke(
-            {
-                "query": state["user_query"],
-                "case_context": state["case_context"],
-            }
-        )
+        payload: dict[str, object] = {
+            "query": state["user_query"],
+            "case_context": state["case_context"],
+        }
+        try:
+            planner = self._planner_model.with_structured_output(ResearchPlanDecision)
+            decision = planner.invoke(payload)
+        except ModelRuntimeError:
+            fallback_planner = self._deterministic_planner_model.with_structured_output(
+                ResearchPlanDecision
+            )
+            decision = fallback_planner.invoke(payload)
         return {
             "research_plan": [question.model_dump() for question in decision.questions],
             "agent_log": [
@@ -424,19 +497,10 @@ class LangGraphAgenticWorkflow:
         self, state: AgenticWorkflowState
     ) -> dict[str, object]:
         context = cast(dict[str, object], state["case_context"])
-        petitioner = context.get("appellant_petitioner") or "the applicant"
-        stage = context.get("stage") or "current proceedings"
-        issues = [
-            str(item)
-            for item in cast(list[object], context.get("open_legal_issues", []))
-        ]
-        synthesis = (
-            f"Legal Position: For {petitioner}, the uploaded record indicates a {stage} matter. "
-            f"Statutory Findings: {' '.join(state['statutory_findings'])} "
-            f"Precedent Findings: {' '.join(state['precedent_findings'])} "
-            f"Counterpoints: {' '.join(state['contradictions'])} "
-            f"Open Issues: {' '.join(issues) if issues else 'No additional open issues extracted.'}"
-        )
+        try:
+            synthesis = self._build_synthesis_with_model(state)
+        except ModelRuntimeError:
+            synthesis = self._build_deterministic_synthesis(context, state)
         return {
             "synthesis": synthesis,
             "agent_log": [
@@ -446,6 +510,55 @@ class LangGraphAgenticWorkflow:
                 }
             ],
         }
+
+    def _build_synthesis_with_model(self, state: AgenticWorkflowState) -> str:
+        if self._synthesis_model_client is None:
+            return self._build_deterministic_synthesis(
+                cast(dict[str, object], state["case_context"]),
+                state,
+            )
+
+        response = self._synthesis_model_client.generate_json(
+            system_prompt="\n".join(
+                [
+                    (
+                        "You are synthesizing an uploaded Indian legal matter "
+                        "into a concise research note."
+                    ),
+                    'Return valid JSON with exactly one key: {"synthesis":"..."}',
+                    (
+                        "The synthesis must begin with 'Legal Position:' and then "
+                        "cover statutory findings, precedent findings, "
+                        "counterpoints, and open issues."
+                    ),
+                ]
+            ),
+            user_prompt=json_prompt_for_agentic_synthesis(state),
+            max_tokens=1200,
+        )
+        synthesis = response.get("synthesis")
+        if not isinstance(synthesis, str) or not synthesis.strip():
+            raise ModelRuntimeError("Synthesis model did not return a synthesis string.")
+        return synthesis.strip()
+
+    def _build_deterministic_synthesis(
+        self,
+        context: dict[str, object],
+        state: AgenticWorkflowState,
+    ) -> str:
+        petitioner = context.get("appellant_petitioner") or "the applicant"
+        stage = context.get("stage") or "current proceedings"
+        issues = [
+            str(item)
+            for item in cast(list[object], context.get("open_legal_issues", []))
+        ]
+        return (
+            f"Legal Position: For {petitioner}, the uploaded record indicates a {stage} matter. "
+            f"Statutory Findings: {' '.join(state['statutory_findings'])} "
+            f"Precedent Findings: {' '.join(state['precedent_findings'])} "
+            f"Counterpoints: {' '.join(state['contradictions'])} "
+            f"Open Issues: {' '.join(issues) if issues else 'No additional open issues extracted.'}"
+        )
 
     def _verification_node(
         self, state: AgenticWorkflowState
@@ -1057,6 +1170,52 @@ class LangGraphAgenticWorkflow:
         if chunk.act_name and chunk.section_number:
             return f"{chunk.act_name}, Section {chunk.section_number}"
         return chunk.section_header
+
+
+def json_prompt_for_agentic_planning(payload: dict[str, object]) -> str:
+    context = cast(dict[str, object], payload["case_context"])
+    charges = cast(list[object], context.get("charges_sections", []))
+    issues = cast(list[object], context.get("open_legal_issues", []))
+    return "\n".join(
+        [
+            f"Query: {payload['query']}",
+            f"Court: {context.get('court') or 'Unknown court'}",
+            f"Stage: {context.get('stage') or 'Unknown stage'}",
+            (
+                f"Charges: {', '.join(str(item) for item in charges) or 'None extracted'}"
+            ),
+            (
+                f"Open issues: {', '.join(str(item) for item in issues) or 'None extracted'}"
+            ),
+        ]
+    )
+
+
+def json_prompt_for_agentic_synthesis(state: AgenticWorkflowState) -> str:
+    context = cast(dict[str, object], state["case_context"])
+    return "\n".join(
+        [
+            f"Query: {state['user_query']}",
+            (
+                f"Petitioner: "
+                f"{context.get('appellant_petitioner') or 'Unknown petitioner'}"
+            ),
+            (
+                f"Respondent: "
+                f"{context.get('respondent_opposite_party') or 'Unknown respondent'}"
+            ),
+            f"Court: {context.get('court') or 'Unknown court'}",
+            f"Stage: {context.get('stage') or 'Unknown stage'}",
+            f"Statutory findings: {' '.join(state['statutory_findings'])}",
+            f"Precedent findings: {' '.join(state['precedent_findings'])}",
+            f"Contradictions: {' '.join(state['contradictions'])}",
+            "Open issues: "
+            + ", ".join(
+                str(item)
+                for item in cast(list[object], context.get("open_legal_issues", []))
+            ),
+        ]
+    )
 
 
 agentic_workflow = LangGraphAgenticWorkflow()

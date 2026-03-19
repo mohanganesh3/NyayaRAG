@@ -9,6 +9,33 @@ from app.rag import (
     PlaceholderOnlyGenerator,
     QueryRouter,
 )
+from app.services.model_runtime import JSONTaskModelClient
+
+
+class FakePlaceholderModelClient(JSONTaskModelClient):
+    def generate_json(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+        max_tokens: int = 1400,
+    ) -> dict[str, object]:
+        assert "Allowed placeholder tokens" in user_prompt
+        return {
+            "sections": [
+                {
+                    "title": "Legal Position",
+                    "paragraphs": [
+                        (
+                            "The current legal position is grounded in the "
+                            "retrieved statute and precedent. "
+                            "[STATUTE: Bharatiya Nyaya Sanhita, Section 101] "
+                            "[CITE: binding Supreme Court authority on the criminal issue]"
+                        )
+                    ],
+                }
+            ]
+        }
 
 
 def _make_document(
@@ -251,6 +278,53 @@ def test_placeholder_generator_keeps_graph_outputs_placeholder_only() -> None:
     assert "(2017) 10 SCC 1" not in rendered
     assert "Maneka Gandhi" not in rendered
     assert "Justice K.S. Puttaswamy" not in rendered
+
+
+def test_placeholder_generator_can_use_model_client_with_allowed_tokens() -> None:
+    router = QueryRouter()
+    generator = PlaceholderOnlyGenerator(model_client=FakePlaceholderModelClient())
+    analysis = router.analyze("What does BNS 101 say and how have courts interpreted it?")
+
+    results = [
+        _hybrid_result(
+            doc_id="doc-bns-101",
+            chunk_id="chunk-bns-101",
+            doc_type=LegalDocumentType.STATUTE,
+            text="Whoever commits murder shall be punished with death or life imprisonment.",
+            section_header="Section 101 - Murder",
+            act_name="Bharatiya Nyaya Sanhita",
+            section_number="101",
+            practice_areas=["criminal"],
+        ),
+        _hybrid_result(
+            doc_id="doc-sc-murder",
+            chunk_id="chunk-sc-murder",
+            doc_type=LegalDocumentType.JUDGMENT,
+            text=(
+                "The Court interpreted the murder provision and clarified the "
+                "governing mens rea test."
+            ),
+            court="Supreme Court",
+            citation="(2024) 2 SCC 500",
+            parties={"appellant": "State of Maharashtra", "respondent": "Arjun Rao"},
+            section_header="Holding",
+            practice_areas=["criminal"],
+            coram=3,
+        ),
+    ]
+
+    draft = generator.generate(analysis.raw_query, analysis, results)
+
+    assert (
+        draft.sections[0].paragraphs[0].count(
+            "[STATUTE: Bharatiya Nyaya Sanhita, Section 101]"
+        )
+        == 1
+    )
+    assert draft.sections[0].paragraphs[0].count(
+        "[CITE: binding Supreme Court authority on the criminal issue]"
+    ) == 1
+    assert len(draft.placeholders) == 2
 
 
 def test_placeholder_generator_marks_unsupported_when_no_authorities_exist() -> None:

@@ -9,6 +9,12 @@ from typing import Protocol
 from app.models import DocumentChunk, LegalDocument, LegalDocumentType
 from app.rag.graph import GraphSearchResult
 from app.schemas import PracticeArea, QueryAnalysis, QueryType
+from app.services.model_runtime import (
+    JSONTaskModelClient,
+    ModelRuntimeError,
+    ModelTask,
+    build_task_model_client,
+)
 
 
 class PlaceholderKind(StrEnum):
@@ -69,6 +75,17 @@ _REPORTER_CITATION_PATTERN = re.compile(
 
 
 class PlaceholderOnlyGenerator:
+    def __init__(
+        self,
+        *,
+        model_client: JSONTaskModelClient | None = None,
+    ) -> None:
+        self._model_client = (
+            model_client
+            if model_client is not None
+            else build_task_model_client(ModelTask.PLACEHOLDER_GENERATION)
+        )
+
     def build_prompt_contract(self) -> PlaceholderPromptContract:
         rules = (
             (
@@ -97,6 +114,26 @@ class PlaceholderOnlyGenerator:
         return PlaceholderPromptContract(system_prompt=system_prompt, rules=rules)
 
     def generate(
+        self,
+        query: str,
+        analysis: QueryAnalysis,
+        results: Sequence[RetrievalResultLike],
+    ) -> GeneratedAnswerDraft:
+        fallback_draft = self._generate_deterministic(query, analysis, results)
+        if self._model_client is None or not results:
+            return fallback_draft
+
+        try:
+            return self._generate_with_model(
+                query=query,
+                analysis=analysis,
+                results=results,
+                fallback_draft=fallback_draft,
+            )
+        except ModelRuntimeError:
+            return fallback_draft
+
+    def _generate_deterministic(
         self,
         query: str,
         analysis: QueryAnalysis,
@@ -227,6 +264,122 @@ class PlaceholderOnlyGenerator:
             query=query,
             sections=tuple(sections),
             placeholders=tuple(placeholders),
+        )
+
+    def _generate_with_model(
+        self,
+        *,
+        query: str,
+        analysis: QueryAnalysis,
+        results: Sequence[RetrievalResultLike],
+        fallback_draft: GeneratedAnswerDraft,
+    ) -> GeneratedAnswerDraft:
+        if self._model_client is None:
+            raise ModelRuntimeError("No configured model client is available.")
+
+        prompt_contract = self.build_prompt_contract()
+        allowed_placeholders = {
+            placeholder.token: placeholder
+            for placeholder in fallback_draft.placeholders
+        }
+        allowed_tokens = tuple(allowed_placeholders)
+        evidence_cards = []
+        for result in results[:5]:
+            matching_placeholder = next(
+                (
+                    placeholder
+                    for placeholder in fallback_draft.placeholders
+                    if placeholder.doc_id == result.doc_id
+                    and placeholder.chunk_id == result.chunk_id
+                ),
+                None,
+            )
+            if matching_placeholder is None:
+                continue
+            evidence_cards.append(
+                {
+                    "token": matching_placeholder.token,
+                    "authority_note": self._authority_note(result),
+                    "excerpt": self._grounded_excerpt(result),
+                }
+            )
+
+        response = self._model_client.generate_json(
+            system_prompt="\n".join(
+                [
+                    prompt_contract.system_prompt,
+                    "Return valid JSON with this shape:",
+                    (
+                        '{"sections":[{"title":"Section title","paragraphs":'
+                        '["Paragraph with exact placeholder tokens."]}]}'
+                    ),
+                    "Use only the exact placeholder tokens provided by the user prompt.",
+                ]
+            ),
+            user_prompt=json_prompt_for_placeholder_generation(
+                query=query,
+                analysis=analysis,
+                allowed_tokens=allowed_tokens,
+                evidence_cards=evidence_cards,
+            ),
+            max_tokens=1400,
+        )
+        sections_payload = response.get("sections")
+        if not isinstance(sections_payload, list):
+            raise ModelRuntimeError("Model response omitted the sections array.")
+
+        sections: list[GeneratedSection] = []
+        rendered_blocks: list[str] = []
+        for section_value in sections_payload:
+            if not isinstance(section_value, dict):
+                raise ModelRuntimeError("Model section entries must be objects.")
+            title = section_value.get("title")
+            paragraphs = section_value.get("paragraphs")
+            if not isinstance(title, str) or not isinstance(paragraphs, list):
+                raise ModelRuntimeError("Model section entries must include title and paragraphs.")
+            normalized_paragraphs = tuple(
+                paragraph
+                for paragraph in paragraphs
+                if isinstance(paragraph, str) and paragraph.strip()
+            )
+            if not normalized_paragraphs:
+                continue
+            sections.append(
+                GeneratedSection(
+                    title=title.strip() or "Research Note",
+                    paragraphs=normalized_paragraphs,
+                )
+            )
+            rendered_blocks.extend(normalized_paragraphs)
+
+        if not sections:
+            raise ModelRuntimeError("Model response did not produce any usable sections.")
+
+        rendered_text = "\n".join(rendered_blocks)
+        bracket_tokens = re.findall(r"\[[A-Z]+: [^\]]+\]", rendered_text)
+        invalid_tokens = [
+            token for token in bracket_tokens if token not in allowed_placeholders
+        ]
+        if invalid_tokens:
+            raise ModelRuntimeError(
+                "Model response used placeholder tokens outside the allowed set."
+            )
+
+        used_placeholders = tuple(
+            placeholder
+            for placeholder in fallback_draft.placeholders
+            if placeholder.token in rendered_text
+        )
+        if not used_placeholders:
+            raise ModelRuntimeError("Model response did not use any allowed placeholder tokens.")
+
+        if _REPORTER_CITATION_PATTERN.search(rendered_text):
+            raise ModelRuntimeError("Model response emitted a raw reporter citation.")
+
+        return GeneratedAnswerDraft(
+            query=query,
+            sections=tuple(sections),
+            placeholders=used_placeholders,
         )
 
     def _legal_position_paragraph(
@@ -435,3 +588,36 @@ class PlaceholderOnlyGenerator:
         if not normalized:
             return None
         return normalized
+
+
+def json_prompt_for_placeholder_generation(
+    *,
+    query: str,
+    analysis: QueryAnalysis,
+    allowed_tokens: Sequence[str],
+    evidence_cards: Sequence[dict[str, str]],
+) -> str:
+    evidence_lines = []
+    for index, card in enumerate(evidence_cards, start=1):
+        evidence_lines.append(
+            "\n".join(
+                [
+                    f"{index}. Token: {card['token']}",
+                    f"   Authority note: {card['authority_note']}",
+                    f"   Excerpt: {card['excerpt']}",
+                ]
+            )
+        )
+
+    return "\n".join(
+        [
+            f"Query: {query}",
+            f"Query type: {analysis.query_type.value}",
+            f"Practice area: {analysis.practice_area.value}",
+            "Allowed placeholder tokens:",
+            *[f"- {token}" for token in allowed_tokens],
+            "Evidence cards:",
+            *evidence_lines,
+            "Write concise legal prose and use only the allowed placeholder tokens.",
+        ]
+    )

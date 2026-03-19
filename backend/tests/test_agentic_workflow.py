@@ -17,9 +17,56 @@ from app.models import (
 from app.rag import CitationBadgeStatus, StructuredAnswerSectionKind
 from app.services.agentic_workflow import LangGraphAgenticWorkflow
 from app.services.billing import billing_store
+from app.services.model_runtime import JSONTaskModelClient
 from app.services.query_runtime import query_runtime
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session, sessionmaker
+
+
+class FakePlanningModelClient(JSONTaskModelClient):
+    def generate_json(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+        max_tokens: int = 1400,
+    ) -> dict[str, object]:
+        assert "Charges:" in user_prompt
+        return {
+            "strategy": "model-backed uploaded-document research",
+            "questions": [
+                {
+                    "question": "Which statutory bail framework applies after the code cutover?",
+                    "focus": "statutory",
+                    "priority": 1,
+                },
+                {
+                    "question": "Which binding precedents best protect liberty on these facts?",
+                    "focus": "precedent",
+                    "priority": 2,
+                },
+            ],
+        }
+
+
+class FakeSynthesisModelClient(JSONTaskModelClient):
+    def generate_json(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+        max_tokens: int = 1400,
+    ) -> dict[str, object]:
+        assert "Statutory findings:" in user_prompt
+        return {
+            "synthesis": (
+                "Legal Position: The uploaded bail record supports a liberty-first submission. "
+                "Statutory Findings: Post-cutover sections must be addressed directly. "
+                "Precedent Findings: Binding Supreme Court authorities should lead the note. "
+                "Counterpoints: The earlier rejection order must be distinguished. "
+                "Open Issues: The necessity of custody remains disputed."
+            )
+        }
 
 
 def _build_case_context() -> CaseContext:
@@ -242,6 +289,36 @@ def test_langgraph_agentic_workflow_runs_with_sqlite_checkpointer(tmp_path) -> N
         "SynthesisAgent",
         "VerificationAgent",
     ]
+
+
+def test_langgraph_agentic_workflow_can_use_model_clients(tmp_path) -> None:
+    engine = build_engine(f"sqlite+pysqlite:///{tmp_path / 'agentic_workflow_models.db'}")
+    Base.metadata.create_all(engine)
+    workflow = LangGraphAgenticWorkflow(
+        sqlite_path=tmp_path / "agentic-models.sqlite",
+        planner_model_client=FakePlanningModelClient(),
+        synthesis_model_client=FakeSynthesisModelClient(),
+    )
+    try:
+        with Session(engine) as session:
+            _seed_agentic_corpus(session)
+            result = workflow.run(
+                user_query="What are my bail arguments?",
+                case_context=_build_case_context(),
+                thread_id="thread-agentic-models",
+                session=session,
+            )
+    finally:
+        workflow.close()
+        engine.dispose()
+
+    assert (
+        result.research_plan[0].question
+        == "Which statutory bail framework applies after the code cutover?"
+    )
+    assert result.synthesis.startswith(
+        "Legal Position: The uploaded bail record supports a liberty-first submission."
+    )
 
 
 def test_workspace_query_stream_uses_agentic_path_and_emits_agent_logs(tmp_path) -> None:

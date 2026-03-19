@@ -25,6 +25,13 @@ class Settings(BaseSettings):
     razorpay_webhook_secret: str | None = None
     razorpay_plan_id_advocate_pro: str = "plan_advocate_pro"
     razorpay_plan_id_chamber_pro: str = "plan_chamber_pro"
+    llm_provider: str = "deterministic"
+    anthropic_api_key: str | None = None
+    anthropic_base_url: str = "https://api.anthropic.com/v1/messages"
+    anthropic_timeout_seconds: float = 30.0
+    anthropic_generation_model: str | None = None
+    anthropic_planner_model: str | None = None
+    anthropic_synthesis_model: str | None = None
 
     model_config = SettingsConfigDict(
         env_file=BACKEND_ROOT / ".env",
