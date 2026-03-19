@@ -19,7 +19,12 @@ import {
   type StructuredAnswer,
   type StructuredAnswerSource,
 } from "../../lib/structured-answer";
-import { fetchWorkspaceHistory, uploadWorkspaceDocuments } from "../../lib/workspace-api";
+import {
+  fetchCitationSource,
+  fetchWorkspaceHistory,
+  uploadWorkspaceDocuments,
+  type WorkspaceCitationSource,
+} from "../../lib/workspace-api";
 import {
   workspaceContextStorageKey,
   workspaceHistoryStorageKey,
@@ -129,6 +134,11 @@ export function WorkspaceShell({
     useState<WorkspaceQueryHistoryPreview[]>(initialQueryHistory);
   const [savedAnswers, setSavedAnswers] = useState<SavedWorkspaceAnswer[]>([]);
   const [selectedSavedAnswerId, setSelectedSavedAnswerId] = useState<string | null>(null);
+  const [sourceViewerCache, setSourceViewerCache] = useState<
+    Record<string, WorkspaceCitationSource>
+  >({});
+  const [sourceViewerError, setSourceViewerError] = useState<string | null>(null);
+  const [sourceViewerLoadingId, setSourceViewerLoadingId] = useState<string | null>(null);
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [uploadStatus, setUploadStatus] = useState<UploadStatus>("idle");
   const [uploadError, setUploadError] = useState<string | null>(null);
@@ -304,6 +314,8 @@ export function WorkspaceShell({
     availableSources.find((source) => source.id === activeSourceId) ??
     availableSources[0] ??
     null;
+  const activeFetchedSource =
+    activeSource !== null ? sourceViewerCache[activeSource.id] ?? null : null;
   const relatedSources = availableSources.filter(
     (source) => source.id !== activeSource?.id,
   );
@@ -326,6 +338,33 @@ export function WorkspaceShell({
 
   function handleSelectSource(source: StructuredAnswerSource) {
     setActiveSourceId(source.id);
+    setSourceViewerError(null);
+    if (!source.docId || sourceViewerCache[source.id] || sourceViewerLoadingId === source.id) {
+      return;
+    }
+
+    setSourceViewerLoadingId(source.id);
+    void fetchCitationSource({
+      authHeaders,
+      chunkId: source.chunkId,
+      docId: source.docId,
+    })
+      .then((resolvedSource) => {
+        setSourceViewerCache((currentCache) => ({
+          ...currentCache,
+          [source.id]: resolvedSource,
+        }));
+      })
+      .catch((error) => {
+        setSourceViewerError(
+          error instanceof Error ? error.message : "Source lookup failed.",
+        );
+      })
+      .finally(() => {
+        setSourceViewerLoadingId((currentLoadingId) =>
+          currentLoadingId === source.id ? null : currentLoadingId,
+        );
+      });
   }
 
   function handleSelectFiles(fileList: FileList | null) {
@@ -381,6 +420,25 @@ export function WorkspaceShell({
     const filename = `${workspaceContext.case_id}-answer.md`;
     downloadTextFile(filename, serializeStructuredAnswerToMarkdown(activeAnswer));
   }
+
+  const activeSourceCitation =
+    activeFetchedSource?.effectiveCitation ??
+    activeSource?.citation ??
+    "No source selected yet.";
+  const activeSourceDocId = activeFetchedSource?.effectiveDocId ?? activeSource?.docId ?? null;
+  const activeSourcePassage =
+    activeFetchedSource?.sourcePassage ?? activeSource?.sourcePassage ?? null;
+  const activeSourceMessage = activeFetchedSource
+    ? [
+        activeFetchedSource.title,
+        activeFetchedSource.sourceSystem,
+        activeFetchedSource.sourceDocumentRef,
+      ]
+        .filter((part): part is string => Boolean(part))
+        .join(" · ")
+    : activeSource?.message ?? null;
+  const activeAppealWarning =
+    activeFetchedSource?.appealWarning ?? activeSource?.appealWarning ?? null;
 
   return (
     <div className="grid gap-4 xl:grid-cols-[19rem_minmax(0,1fr)_20rem] xl:items-start">
@@ -807,7 +865,7 @@ export function WorkspaceShell({
 
           <div className="mt-5 rounded-[1.2rem] border border-[rgba(244,236,221,0.12)] bg-[rgba(252,247,239,0.06)] p-4">
             <p className="font-serif text-xl text-paper-50">
-              {activeSource?.citation ?? "No source selected yet."}
+              {activeSourceCitation}
             </p>
             <div className="mt-3 flex flex-wrap gap-2">
               <CitationBadge
@@ -821,14 +879,27 @@ export function WorkspaceShell({
               >
                 {activeSource?.status ?? "UNVERIFIED"}
               </CitationBadge>
-              {activeSource?.docId ? (
-                <CitationBadge tone="binding">{activeSource.docId}</CitationBadge>
+              {activeSourceDocId ? (
+                <CitationBadge tone="binding">{activeSourceDocId}</CitationBadge>
+              ) : null}
+              {activeFetchedSource ? (
+                <CitationBadge tone="persuasive">
+                  {activeFetchedSource.currentValidity}
+                </CitationBadge>
+              ) : null}
+              {sourceViewerLoadingId === activeSource?.id ? (
+                <CitationBadge tone="persuasive">Loading source</CitationBadge>
               ) : null}
             </div>
             <p className="mt-3 text-sm leading-7 text-[rgba(252,247,239,0.78)]">
-              {activeSource?.message ??
+              {activeSourceMessage ??
                 "Select an inline citation badge from the answer to inspect the supporting source."}
             </p>
+            {sourceViewerError ? (
+              <p className="mt-3 text-sm leading-7 text-[rgba(242,177,172,0.82)]">
+                {sourceViewerError}
+              </p>
+            ) : null}
           </div>
 
           <div className="mt-4 rounded-[1rem] border border-[rgba(244,236,221,0.12)] bg-[rgba(252,247,239,0.04)] p-4">
@@ -836,18 +907,34 @@ export function WorkspaceShell({
               Relevant passage
             </p>
             <p className="mt-3 text-sm leading-7 text-[rgba(252,247,239,0.84)]">
-              {activeSource?.sourcePassage ??
+              {activeSourcePassage ??
                 "No source passage is active yet."}
             </p>
           </div>
 
-          {activeSource?.appealWarning ? (
+          {activeFetchedSource?.sourceUrl ? (
+            <div className="mt-4 rounded-[1rem] border border-[rgba(244,236,221,0.12)] bg-[rgba(252,247,239,0.04)] p-4">
+              <p className="font-mono text-xs uppercase tracking-[0.2em] text-[rgba(244,236,221,0.6)]">
+                Canonical source
+              </p>
+              <a
+                className="mt-3 block break-all text-sm leading-7 text-[rgba(252,247,239,0.84)] underline decoration-[rgba(244,236,221,0.36)] underline-offset-4"
+                href={activeFetchedSource.sourceUrl}
+                rel="noreferrer"
+                target="_blank"
+              >
+                {activeFetchedSource.sourceUrl}
+              </a>
+            </div>
+          ) : null}
+
+          {activeAppealWarning ? (
             <div className="mt-4 rounded-[1rem] border border-[rgba(152,80,77,0.24)] bg-[rgba(152,80,77,0.08)] p-4">
               <p className="font-mono text-xs uppercase tracking-[0.2em] text-[rgba(242,177,172,0.72)]">
                 Appeal warning
               </p>
               <p className="mt-3 text-sm leading-7 text-[rgba(252,247,239,0.82)]">
-                {activeSource.appealWarning}
+                {activeAppealWarning}
               </p>
             </div>
           ) : null}

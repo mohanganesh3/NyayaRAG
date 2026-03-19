@@ -9,10 +9,35 @@ const apiBaseUrl =
 
 type WorkspaceApiRecord = Record<string, unknown>;
 
+export type WorkspaceCitationSource = {
+  actName: string | null;
+  appealStatus: string;
+  appealWarning: string | null;
+  citation: string | null;
+  currentValidity: string;
+  date: string | null;
+  docId: string;
+  docType: string;
+  effectiveCitation: string | null;
+  effectiveDocId: string;
+  pathDocIds: string[];
+  sectionHeader: string | null;
+  sectionNumber: string | null;
+  sourceDocumentRef: string | null;
+  sourcePassage: string | null;
+  sourceSystem: string | null;
+  sourceUrl: string | null;
+  title: string;
+};
+
 function asRecord(value: unknown): WorkspaceApiRecord | null {
   return typeof value === "object" && value !== null && !Array.isArray(value)
     ? (value as WorkspaceApiRecord)
     : null;
+}
+
+function readString(value: unknown): string | null {
+  return typeof value === "string" && value.length > 0 ? value : null;
 }
 
 function readErrorMessage(value: unknown): string {
@@ -53,6 +78,47 @@ function normalizeHistoryEntry(value: unknown): WorkspaceQueryHistoryPreview | n
         ? status
         : "error",
     workspaceId,
+  };
+}
+
+function normalizeCitationSource(value: unknown): WorkspaceCitationSource | null {
+  const record = asRecord(value);
+  if (!record) {
+    return null;
+  }
+
+  const docId = readString(record.doc_id);
+  const effectiveDocId = readString(record.effective_doc_id);
+  const title = readString(record.title);
+  const appealStatus = readString(record.appeal_status);
+  const currentValidity = readString(record.current_validity);
+  const docType = readString(record.doc_type);
+
+  if (!docId || !effectiveDocId || !title || !appealStatus || !currentValidity || !docType) {
+    return null;
+  }
+
+  return {
+    actName: readString(record.act_name),
+    appealStatus,
+    appealWarning: readString(record.appeal_warning),
+    citation: readString(record.citation),
+    currentValidity,
+    date: readString(record.date),
+    docId,
+    docType,
+    effectiveCitation: readString(record.effective_citation),
+    effectiveDocId,
+    pathDocIds: Array.isArray(record.path_doc_ids)
+      ? record.path_doc_ids.filter((item): item is string => typeof item === "string")
+      : [],
+    sectionHeader: readString(record.section_header),
+    sectionNumber: readString(record.section_number),
+    sourceDocumentRef: readString(record.source_document_ref),
+    sourcePassage: readString(record.source_passage),
+    sourceSystem: readString(record.source_system),
+    sourceUrl: readString(record.source_url),
+    title,
   };
 }
 
@@ -117,4 +183,38 @@ export async function fetchWorkspaceHistory(args: {
   return items
     .map(normalizeHistoryEntry)
     .filter((entry): entry is WorkspaceQueryHistoryPreview => entry !== null);
+}
+
+export async function fetchCitationSource(args: {
+  authHeaders?: Record<string, string>;
+  chunkId?: string | null;
+  docId: string;
+}): Promise<WorkspaceCitationSource> {
+  const params = new URLSearchParams();
+  if (args.chunkId) {
+    params.set("chunk_id", args.chunkId);
+  }
+
+  const response = await fetch(
+    `${apiBaseUrl}/api/citation/${args.docId}/source${
+      params.toString().length > 0 ? `?${params.toString()}` : ""
+    }`,
+    {
+      headers: {
+        ...(args.authHeaders ?? {}),
+      },
+    },
+  );
+  const payload = (await response.json()) as unknown;
+  if (!response.ok) {
+    throw new Error(readErrorMessage(payload));
+  }
+
+  const record = asRecord(payload);
+  const normalized = normalizeCitationSource(record?.data);
+  if (!normalized) {
+    throw new Error("Citation source lookup completed, but the response payload was invalid.");
+  }
+
+  return normalized;
 }
