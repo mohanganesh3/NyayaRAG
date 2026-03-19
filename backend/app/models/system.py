@@ -34,3 +34,13 @@ class QueryHistoryEntry(UUIDPrimaryKeyMixin, TimestampMixin, JSONPayloadMixin, B
     status: Mapped[str] = mapped_column(String(50), nullable=False, default="accepted", index=True)
     answer_preview: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     error_message: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+
+
+class SavedWorkspaceAnswer(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "saved_workspace_answers"
+
+    workspace_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    auth_user_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    query_text: Mapped[str] = mapped_column(String(4000), nullable=False)
+    overall_status: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
+    answer_payload: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)

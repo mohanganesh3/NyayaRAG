@@ -1,3 +1,5 @@
+import type { StructuredAnswer } from "./structured-answer";
+
 export type WorkspaceCaseType =
   | "criminal"
   | "civil"
@@ -56,6 +58,26 @@ export type WorkspaceCaseContext = {
   stage: WorkspaceCaseStage | null;
   statutes_involved: string[];
   uploaded_docs: WorkspaceUploadedDocument[];
+};
+
+export type WorkspaceListItem = {
+  appellant_petitioner: string | null;
+  case_id: string;
+  case_number: string | null;
+  case_type: WorkspaceCaseType | null;
+  court: string | null;
+  respondent_opposite_party: string | null;
+  stage: WorkspaceCaseStage | null;
+  updated_at: string;
+  uploaded_doc_count: number;
+};
+
+export type SavedWorkspaceAnswerRecord = {
+  answer: StructuredAnswer;
+  id: string;
+  overallStatus: string;
+  query: string;
+  savedAt: string;
 };
 
 type WorkspaceRecord = Record<string, unknown>;
@@ -286,4 +308,16 @@ export const demoWorkspaceContext: WorkspaceCaseContext = {
     },
   ],
   doc_extraction_confidence: 0.93,
+};
+
+export const demoWorkspaceListItem: WorkspaceListItem = {
+  appellant_petitioner: demoWorkspaceContext.appellant_petitioner,
+  case_id: demoWorkspaceContext.case_id,
+  case_number: demoWorkspaceContext.case_number,
+  case_type: demoWorkspaceContext.case_type,
+  court: demoWorkspaceContext.court,
+  respondent_opposite_party: demoWorkspaceContext.respondent_opposite_party,
+  stage: demoWorkspaceContext.stage,
+  updated_at: "2026-03-20T09:00:00.000Z",
+  uploaded_doc_count: demoWorkspaceContext.uploaded_docs.length,
 };

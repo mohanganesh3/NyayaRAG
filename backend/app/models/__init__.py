@@ -30,7 +30,12 @@ from app.models.legal import (
     ValidityStatus,
 )
 from app.models.provenance import IngestionRun, IngestionRunStatus, SourceRegistry, SourceType
-from app.models.system import BackgroundTaskRun, QueryHistoryEntry, RuntimeSetting
+from app.models.system import (
+    BackgroundTaskRun,
+    QueryHistoryEntry,
+    RuntimeSetting,
+    SavedWorkspaceAnswer,
+)
 from app.models.vector_store import (
     VectorDistanceMetric,
     VectorStoreBackend,
@@ -65,6 +70,7 @@ __all__ = [
     "IngestionRun",
     "IngestionRunStatus",
     "RuntimeSetting",
+    "SavedWorkspaceAnswer",
     "SourceRegistry",
     "SourceType",
     "StatuteAmendment",

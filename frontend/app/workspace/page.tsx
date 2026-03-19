@@ -6,16 +6,36 @@ import {
   buildFrontendAuthHeaders,
   resolveFrontendAuthSession,
 } from "../../lib/auth-session";
-import { demoQueryHistoryForSession } from "../../lib/query-history";
-import { demoWorkspaceContext } from "../../lib/workspace";
+import { getWorkspacePageData } from "../../lib/workspace-page";
 
-export default function WorkspacePage() {
+type WorkspacePageProps = {
+  searchParams?:
+    | Promise<Record<string, string | string[] | undefined>>
+    | Record<string, string | string[] | undefined>;
+};
+
+async function resolveSearchParams(
+  searchParams: WorkspacePageProps["searchParams"],
+): Promise<Record<string, string | string[] | undefined>> {
+  if (!searchParams) {
+    return {};
+  }
+  if (typeof (searchParams as Promise<unknown>).then === "function") {
+    return (await searchParams) as Record<string, string | string[] | undefined>;
+  }
+  return searchParams;
+}
+
+export default async function WorkspacePage({ searchParams }: WorkspacePageProps = {}) {
   const authSession = resolveFrontendAuthSession();
   const authHeaders = buildFrontendAuthHeaders(authSession);
-  const queryHistory = demoQueryHistoryForSession(
-    authSession,
-    demoWorkspaceContext.case_id,
-  );
+  const resolvedSearchParams = await resolveSearchParams(searchParams);
+  const { availableWorkspaces, context, queryHistory, savedAnswers, source } =
+    await getWorkspacePageData({
+      authHeaders,
+      authSession,
+      requestedCaseId: resolvedSearchParams.case,
+    });
 
   return (
     <main className="min-h-screen text-ink-900">
@@ -29,6 +49,11 @@ export default function WorkspacePage() {
             <p className="max-w-3xl text-sm leading-7 text-ink-700">
               This route is the protected product shell: case context on the
               left, research flow in the center, source evidence on the right.
+            </p>
+            <p className="text-xs uppercase tracking-[0.18em] text-ink-700">
+              {source === "live"
+                ? "Live backend workspace"
+                : "Preview workspace fallback"}
             </p>
           </div>
 
@@ -47,9 +72,11 @@ export default function WorkspacePage() {
         </div>
 
         <WorkspaceShell
+          availableWorkspaces={availableWorkspaces}
           authHeaders={authHeaders}
           authSession={authSession}
-          context={demoWorkspaceContext}
+          context={context}
+          savedAnswers={savedAnswers}
           queryHistory={queryHistory}
         />
       </section>

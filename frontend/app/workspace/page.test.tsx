@@ -3,14 +3,15 @@ import { render, screen } from "@testing-library/react";
 import WorkspacePage from "./page";
 
 describe("WorkspacePage", () => {
-  it("renders the three-panel workspace shell", () => {
-    render(<WorkspacePage />);
+  it("renders the three-panel workspace shell", async () => {
+    render(await WorkspacePage());
 
     expect(
       screen.getByRole("heading", {
         name: /Three panels, one legal research flow/i,
       }),
     ).toBeInTheDocument();
+    expect(screen.getByText(/Preview workspace fallback/i)).toBeInTheDocument();
     expect(screen.getByText(/Uploaded documents/i)).toBeInTheDocument();
     expect(screen.getByText(/Upload workspace files/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/Query input/i)).toBeInTheDocument();

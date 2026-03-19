@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 
 import { BootstrapQueryConsole } from "../research/BootstrapQueryConsole";
@@ -21,11 +22,17 @@ import {
 } from "../../lib/structured-answer";
 import {
   fetchCitationSource,
+  fetchWorkspace,
+  fetchWorkspaceList,
   fetchWorkspaceHistory,
+  fetchWorkspaceSavedAnswers,
+  saveWorkspaceAnswer,
   uploadWorkspaceDocuments,
   type WorkspaceCitationSource,
 } from "../../lib/workspace-api";
 import {
+  type SavedWorkspaceAnswerRecord,
+  type WorkspaceListItem,
   workspaceContextStorageKey,
   workspaceHistoryStorageKey,
   workspaceSavedAnswersStorageKey,
@@ -36,9 +43,11 @@ import { StructuredAnswerRenderer } from "./StructuredAnswerRenderer";
 import { TransparencyDrawer } from "./TransparencyDrawer";
 
 type WorkspaceShellProps = {
+  availableWorkspaces: WorkspaceListItem[];
   authHeaders: Record<string, string>;
   authSession: FrontendAuthSession;
   context: WorkspaceCaseContext;
+  savedAnswers: SavedWorkspaceAnswerRecord[];
   queryHistory: WorkspaceQueryHistoryPreview[];
 };
 
@@ -47,13 +56,6 @@ const suggestedQueries = [
   "Which Supreme Court authorities support treating this as a civil dispute?",
   "What weaknesses will the prosecution press in reply?",
 ];
-
-type SavedWorkspaceAnswer = {
-  answer: StructuredAnswer;
-  id: string;
-  query: string;
-  savedAt: string;
-};
 
 type UploadStatus =
   | "idle"
@@ -119,9 +121,11 @@ function resolveBrowserStorage(): Storage | null {
 }
 
 export function WorkspaceShell({
+  availableWorkspaces,
   authHeaders,
   authSession,
   context: initialContext,
+  savedAnswers: initialSavedAnswers,
   queryHistory: initialQueryHistory,
 }: WorkspaceShellProps) {
   const defaultWorkspaceQuery =
@@ -132,7 +136,8 @@ export function WorkspaceShell({
     useState<WorkspaceCaseContext>(initialContext);
   const [workspaceHistory, setWorkspaceHistory] =
     useState<WorkspaceQueryHistoryPreview[]>(initialQueryHistory);
-  const [savedAnswers, setSavedAnswers] = useState<SavedWorkspaceAnswer[]>([]);
+  const [savedAnswers, setSavedAnswers] =
+    useState<SavedWorkspaceAnswerRecord[]>(initialSavedAnswers);
   const [selectedSavedAnswerId, setSelectedSavedAnswerId] = useState<string | null>(null);
   const [sourceViewerCache, setSourceViewerCache] = useState<
     Record<string, WorkspaceCitationSource>
@@ -158,6 +163,16 @@ export function WorkspaceShell({
   );
 
   useEffect(() => {
+    setWorkspaceContext(initialContext);
+    setWorkspaceHistory(initialQueryHistory);
+    setSavedAnswers(initialSavedAnswers);
+    setSelectedSavedAnswerId(null);
+  }, [initialContext, initialQueryHistory, initialSavedAnswers]);
+
+  useEffect(() => {
+    if (authSession.isAuthenticated) {
+      return;
+    }
     const storage = resolveBrowserStorage();
     if (!storage) {
       return;
@@ -171,18 +186,24 @@ export function WorkspaceShell({
         storage.removeItem(storageScopeKey);
       }
     }
-  }, [storageScopeKey]);
+  }, [authSession.isAuthenticated, storageScopeKey]);
 
   useEffect(() => {
+    if (authSession.isAuthenticated) {
+      return;
+    }
     const storage = resolveBrowserStorage();
     if (!storage) {
       return;
     }
 
     storage.setItem(storageScopeKey, JSON.stringify(workspaceContext));
-  }, [storageScopeKey, workspaceContext]);
+  }, [authSession.isAuthenticated, storageScopeKey, workspaceContext]);
 
   useEffect(() => {
+    if (authSession.isAuthenticated) {
+      return;
+    }
     const storage = resolveBrowserStorage();
     if (!storage) {
       return;
@@ -201,18 +222,24 @@ export function WorkspaceShell({
     }
 
     setWorkspaceHistory(initialQueryHistory);
-  }, [historyStorageKey, initialQueryHistory]);
+  }, [authSession.isAuthenticated, historyStorageKey, initialQueryHistory]);
 
   useEffect(() => {
+    if (authSession.isAuthenticated) {
+      return;
+    }
     const storage = resolveBrowserStorage();
     if (!storage) {
       return;
     }
 
     storage.setItem(historyStorageKey, JSON.stringify(workspaceHistory));
-  }, [historyStorageKey, workspaceHistory]);
+  }, [authSession.isAuthenticated, historyStorageKey, workspaceHistory]);
 
   useEffect(() => {
+    if (authSession.isAuthenticated) {
+      return;
+    }
     const storage = resolveBrowserStorage();
     if (!storage) {
       return;
@@ -221,7 +248,7 @@ export function WorkspaceShell({
     const persistedAnswers = storage.getItem(savedAnswersStorageKey);
     if (persistedAnswers) {
       try {
-        setSavedAnswers(JSON.parse(persistedAnswers) as SavedWorkspaceAnswer[]);
+        setSavedAnswers(JSON.parse(persistedAnswers) as SavedWorkspaceAnswerRecord[]);
         return;
       } catch {
         storage.removeItem(savedAnswersStorageKey);
@@ -229,16 +256,19 @@ export function WorkspaceShell({
     }
 
     setSavedAnswers([]);
-  }, [savedAnswersStorageKey]);
+  }, [authSession.isAuthenticated, savedAnswersStorageKey]);
 
   useEffect(() => {
+    if (authSession.isAuthenticated) {
+      return;
+    }
     const storage = resolveBrowserStorage();
     if (!storage) {
       return;
     }
 
     storage.setItem(savedAnswersStorageKey, JSON.stringify(savedAnswers));
-  }, [savedAnswers, savedAnswersStorageKey]);
+  }, [authSession.isAuthenticated, savedAnswers, savedAnswersStorageKey]);
 
   useEffect(() => {
     if (!lastSubmittedQuery) {
@@ -268,31 +298,39 @@ export function WorkspaceShell({
   ]);
 
   useEffect(() => {
-    if (!authSession.isAuthenticated || workspaceContext.case_id === initialContext.case_id) {
+    if (!authSession.isAuthenticated) {
       return;
     }
 
     let cancelled = false;
-    void fetchWorkspaceHistory({
-      authHeaders,
-      caseId: workspaceContext.case_id,
-    })
-      .then((history) => {
-        if (!cancelled && history.length > 0) {
-          setWorkspaceHistory(history);
+    void Promise.all([
+      fetchWorkspace({
+        authHeaders,
+        caseId: workspaceContext.case_id,
+      }),
+      fetchWorkspaceHistory({
+        authHeaders,
+        caseId: workspaceContext.case_id,
+      }),
+      fetchWorkspaceSavedAnswers({
+        authHeaders,
+        caseId: workspaceContext.case_id,
+      }),
+    ])
+      .then(([context, history, answers]) => {
+        if (cancelled) {
+          return;
         }
+        setWorkspaceContext(context);
+        setWorkspaceHistory(history);
+        setSavedAnswers(answers);
       })
       .catch(() => undefined);
 
     return () => {
       cancelled = true;
     };
-  }, [
-    authHeaders,
-    authSession.isAuthenticated,
-    initialContext.case_id,
-    workspaceContext.case_id,
-  ]);
+  }, [authHeaders, authSession.isAuthenticated, workspaceContext.case_id]);
 
   useEffect(() => {
     if (availableSources.length === 0) {
@@ -402,13 +440,29 @@ export function WorkspaceShell({
     }
   }
 
-  function handleSaveAnswer() {
+  async function handleSaveAnswer() {
     const answerToSave = streamState.structuredAnswer ?? activeAnswer;
+    if (authSession.isAuthenticated) {
+      try {
+        const savedAnswer = await saveWorkspaceAnswer({
+          answer: answerToSave,
+          authHeaders,
+          caseId: workspaceContext.case_id,
+        });
+        setSavedAnswers((currentAnswers) => [savedAnswer, ...currentAnswers].slice(0, 8));
+        setSelectedSavedAnswerId(savedAnswer.id);
+        return;
+      } catch {
+        // Fall back to local persistence below if the backend save fails.
+      }
+    }
+
     const query = answerToSave.query || "Saved answer";
     const savedAt = new Date().toISOString();
-    const entry: SavedWorkspaceAnswer = {
+    const entry: SavedWorkspaceAnswerRecord = {
       answer: answerToSave,
       id: `${workspaceContext.case_id}-${savedAt}`,
+      overallStatus: answerToSave.overallStatus,
       query,
       savedAt,
     };
@@ -444,6 +498,41 @@ export function WorkspaceShell({
     <div className="grid gap-4 xl:grid-cols-[19rem_minmax(0,1fr)_20rem] xl:items-start">
       <div className="space-y-4 xl:sticky xl:top-6">
         <SurfaceCard className="p-5" tone="paper">
+          {availableWorkspaces.length > 0 ? (
+            <div className="mb-6">
+              <SectionLabel>Workspace index</SectionLabel>
+              <div className="mt-4 space-y-3">
+                {availableWorkspaces.map((workspace) => (
+                  <Link
+                    className={`block rounded-[1rem] border px-3 py-3 text-left transition ${
+                      workspace.case_id === workspaceContext.case_id
+                        ? "border-[rgba(171,127,40,0.28)] bg-[rgba(171,127,40,0.08)]"
+                        : "border-[rgba(16,32,53,0.08)] bg-white/72 hover:border-[rgba(171,127,40,0.28)]"
+                    }`}
+                    href={`/workspace?case=${workspace.case_id}`}
+                    key={workspace.case_id}
+                  >
+                    <p className="text-sm font-semibold text-ink-950">
+                      {workspace.appellant_petitioner ?? "Unknown party"} v.{" "}
+                      {workspace.respondent_opposite_party ?? "Unknown respondent"}
+                    </p>
+                    <p className="mt-1 text-xs uppercase tracking-[0.16em] text-ink-700">
+                      {workspace.case_number ?? "No case number"} ·{" "}
+                      {workspace.court ?? "Unknown court"}
+                    </p>
+                  </Link>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
+          {availableWorkspaces.length === 0 ? (
+            <div className="mb-6 rounded-[1rem] border border-dashed border-[rgba(16,32,53,0.12)] bg-white/72 px-4 py-4 text-sm leading-7 text-ink-700">
+              No persisted workspaces yet. Upload a case bundle to create the
+              first protected workspace.
+            </div>
+          ) : null}
+
           <SectionLabel>Case context</SectionLabel>
           <h1 className="mt-3 text-3xl text-ink-950">
             {workspaceContext.appellant_petitioner} v.{" "}
@@ -652,7 +741,9 @@ export function WorkspaceShell({
             <div className="flex flex-wrap gap-2">
               <button
                 className="rounded-full border border-[rgba(16,32,53,0.1)] bg-white/78 px-4 py-2 text-sm font-semibold text-ink-950 transition hover:-translate-y-0.5 hover:border-[rgba(171,127,40,0.28)]"
-                onClick={handleSaveAnswer}
+                onClick={() => {
+                  void handleSaveAnswer();
+                }}
                 type="button"
               >
                 Save answer

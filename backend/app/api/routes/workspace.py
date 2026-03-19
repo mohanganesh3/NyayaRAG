@@ -8,10 +8,19 @@ from app.db.session import get_db
 from app.models import CaseContext
 from app.schemas.legal import CaseContextRead
 from app.schemas.query import QueryHistoryEntryRead
-from app.schemas.workspace import CaseContextResponse, WorkspaceQueryHistoryResponse
+from app.schemas.workspace import (
+    CaseContextResponse,
+    SavedWorkspaceAnswerRead,
+    WorkspaceListResponse,
+    WorkspaceQueryHistoryResponse,
+    WorkspaceSavedAnswerCreateRequest,
+    WorkspaceSavedAnswerResponse,
+    WorkspaceSavedAnswersResponse,
+)
 from app.services.case_contexts import case_context_builder
 from app.services.query_history import query_history_store
 from app.services.upload_ingestion import upload_ingestion_service
+from app.services.workspaces import workspace_store
 
 router = APIRouter(tags=["workspace"])
 DbSession = Annotated[Session, Depends(get_db)]
@@ -42,6 +51,14 @@ def _require_owned_workspace(*, db: Session, case_id: str, auth: AuthContext) ->
     return context
 
 
+@router.get("/workspaces", response_model=WorkspaceListResponse)
+def list_workspaces(db: DbSession, auth: RequiredAuth) -> WorkspaceListResponse:
+    workspaces = workspace_store.list_for_user(session=db, auth_user_id=auth.user_id or "")
+    return WorkspaceListResponse(
+        data=[workspace_store.build_list_item(context) for context in workspaces]
+    )
+
+
 @router.get("/workspace/{case_id}", response_model=CaseContextResponse)
 def get_workspace(case_id: str, db: DbSession, auth: RequiredAuth) -> CaseContextResponse:
     context = _require_owned_workspace(db=db, case_id=case_id, auth=auth)
@@ -62,6 +79,73 @@ def get_workspace_history(
     )
     return WorkspaceQueryHistoryResponse(
         data=[QueryHistoryEntryRead.model_validate(entry) for entry in entries]
+    )
+
+
+@router.get(
+    "/workspace/{case_id}/saved-answers",
+    response_model=WorkspaceSavedAnswersResponse,
+)
+def get_workspace_saved_answers(
+    case_id: str,
+    db: DbSession,
+    auth: RequiredAuth,
+) -> WorkspaceSavedAnswersResponse:
+    _require_owned_workspace(db=db, case_id=case_id, auth=auth)
+    saved_answers = workspace_store.list_saved_answers(
+        session=db,
+        auth_user_id=auth.user_id or "",
+        workspace_id=case_id,
+    )
+    return WorkspaceSavedAnswersResponse(
+        data=[
+            SavedWorkspaceAnswerRead(
+                id=answer.id,
+                workspace_id=answer.workspace_id,
+                auth_user_id=answer.auth_user_id,
+                query_text=answer.query_text,
+                overall_status=answer.overall_status,
+                answer=answer.answer_payload,
+                created_at=answer.created_at,
+                updated_at=answer.updated_at,
+            )
+            for answer in saved_answers
+        ]
+    )
+
+
+@router.post(
+    "/workspace/{case_id}/saved-answers",
+    response_model=WorkspaceSavedAnswerResponse,
+)
+def create_workspace_saved_answer(
+    case_id: str,
+    request: WorkspaceSavedAnswerCreateRequest,
+    db: DbSession,
+    auth: RequiredAuth,
+) -> WorkspaceSavedAnswerResponse:
+    _require_owned_workspace(db=db, case_id=case_id, auth=auth)
+    saved_answer = workspace_store.save_answer(
+        session=db,
+        auth_user_id=auth.user_id or "",
+        workspace_id=case_id,
+        query_text=request.query_text,
+        overall_status=request.overall_status,
+        answer=request.answer,
+    )
+    db.commit()
+    db.refresh(saved_answer)
+    return WorkspaceSavedAnswerResponse(
+        data=SavedWorkspaceAnswerRead(
+            id=saved_answer.id,
+            workspace_id=saved_answer.workspace_id,
+            auth_user_id=saved_answer.auth_user_id,
+            query_text=saved_answer.query_text,
+            overall_status=saved_answer.overall_status,
+            answer=saved_answer.answer_payload,
+            created_at=saved_answer.created_at,
+            updated_at=saved_answer.updated_at,
+        )
     )
 
 

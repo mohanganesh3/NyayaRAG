@@ -17,9 +17,14 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session, sessionmaker
 
 
-def _seed_workspace(session: Session, *, owner_auth_user_id: str) -> str:
+def _seed_workspace(
+    session: Session,
+    *,
+    owner_auth_user_id: str,
+    case_id: str = "case-auth-001",
+) -> str:
     context = CaseContext(
-        case_id="case-auth-001",
+        case_id=case_id,
         owner_auth_user_id=owner_auth_user_id,
         owner_display_name="Mohan Ganesh",
         auth_provider="clerk",
@@ -43,6 +48,84 @@ def _seed_workspace(session: Session, *, owner_auth_user_id: str) -> str:
     session.add(context)
     session.commit()
     return context.case_id
+
+
+def test_workspace_list_and_saved_answers_are_scoped_to_authenticated_user(tmp_path) -> None:
+    engine = build_engine(f"sqlite+pysqlite:///{tmp_path / 'workspace_saved_answers.db'}")
+    Base.metadata.create_all(engine)
+
+    with Session(engine) as session:
+        first_case_id = _seed_workspace(
+            session,
+            owner_auth_user_id="clerk-user-1",
+            case_id="case-auth-001",
+        )
+        second_case_id = _seed_workspace(
+            session,
+            owner_auth_user_id="clerk-user-1",
+            case_id="case-auth-002",
+        )
+        _seed_workspace(
+            session,
+            owner_auth_user_id="clerk-user-2",
+            case_id="case-auth-003",
+        )
+
+    def override_get_db():
+        with Session(engine) as session:
+            yield session
+
+    app.dependency_overrides[get_db] = override_get_db
+    try:
+        client = TestClient(app)
+        headers = {"X-Clerk-User-Id": "clerk-user-1"}
+
+        list_response = client.get("/api/workspaces", headers=headers)
+        create_saved_answer_response = client.post(
+            f"/api/workspace/{first_case_id}/saved-answers",
+            headers=headers,
+            json={
+                "query_text": "What are the strongest bail arguments?",
+                "overall_status": "VERIFIED",
+                "answer": {
+                    "overall_status": "VERIFIED",
+                    "query": "What are the strongest bail arguments?",
+                    "sections": [],
+                },
+            },
+        )
+        saved_answers_response = client.get(
+            f"/api/workspace/{first_case_id}/saved-answers",
+            headers=headers,
+        )
+        forbidden_saved_answers_response = client.get(
+            "/api/workspace/case-auth-003/saved-answers",
+            headers=headers,
+        )
+    finally:
+        app.dependency_overrides.clear()
+        engine.dispose()
+
+    assert list_response.status_code == 200
+    list_body = list_response.json()
+    assert {item["case_id"] for item in list_body["data"]} == {
+        first_case_id,
+        second_case_id,
+    }
+
+    assert create_saved_answer_response.status_code == 200
+    saved_answer_body = create_saved_answer_response.json()
+    assert saved_answer_body["data"]["workspace_id"] == first_case_id
+    assert saved_answer_body["data"]["overall_status"] == "VERIFIED"
+    assert saved_answer_body["data"]["answer"]["query"] == "What are the strongest bail arguments?"
+
+    assert saved_answers_response.status_code == 200
+    saved_answers_body = saved_answers_response.json()
+    assert len(saved_answers_body["data"]) == 1
+    assert saved_answers_body["data"][0]["workspace_id"] == first_case_id
+
+    assert forbidden_saved_answers_response.status_code == 403
+    assert forbidden_saved_answers_response.json()["error"]["code"] == "workspace_forbidden"
 
 
 def test_workspace_route_requires_auth(tmp_path) -> None:

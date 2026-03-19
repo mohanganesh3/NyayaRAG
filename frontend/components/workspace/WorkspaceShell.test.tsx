@@ -1,8 +1,8 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 import type { FrontendAuthSession } from "../../lib/auth-session";
 import { demoQueryHistoryForSession } from "../../lib/query-history";
-import { demoWorkspaceContext } from "../../lib/workspace";
+import { demoWorkspaceContext, demoWorkspaceListItem } from "../../lib/workspace";
 import { WorkspaceShell } from "./WorkspaceShell";
 
 function createStorageMock(): Storage {
@@ -120,9 +120,11 @@ describe("WorkspaceShell", () => {
 
     render(
       <WorkspaceShell
+        availableWorkspaces={[demoWorkspaceListItem]}
         authHeaders={{ "X-Nyayarag-Dev-User-Id": "dev-advocate" }}
         authSession={authSession}
         context={demoWorkspaceContext}
+        savedAnswers={[]}
         queryHistory={demoQueryHistoryForSession(
           authSession,
           demoWorkspaceContext.case_id,
@@ -130,8 +132,9 @@ describe("WorkspaceShell", () => {
       />,
     );
 
-    expect(screen.getByText(/Arjun Rao v\. State of Karnataka/i)).toBeInTheDocument();
-    expect(screen.getByText(/Criminal Petition No\. 4812\/2026/i)).toBeInTheDocument();
+    expect(screen.getByText(/Workspace index/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/Arjun Rao v\. State of Karnataka/i).length).toBeGreaterThan(1);
+    expect(screen.getAllByText(/Criminal Petition No\. 4812\/2026/i).length).toBeGreaterThan(1);
     expect(screen.getByText(/Uploaded documents/i)).toBeInTheDocument();
     expect(screen.getByText(/Upload workspace files/i)).toBeInTheDocument();
     expect(screen.getByText(/Protected workspace/i)).toBeInTheDocument();
@@ -235,9 +238,11 @@ describe("WorkspaceShell", () => {
 
     render(
       <WorkspaceShell
+        availableWorkspaces={[demoWorkspaceListItem]}
         authHeaders={{ "X-Nyayarag-Dev-User-Id": "dev-advocate" }}
         authSession={authSession}
         context={demoWorkspaceContext}
+        savedAnswers={[]}
         queryHistory={demoQueryHistoryForSession(
           authSession,
           demoWorkspaceContext.case_id,
@@ -254,7 +259,9 @@ describe("WorkspaceShell", () => {
       },
     });
 
-    fireEvent.click(screen.getByRole("button", { name: /Process uploads/i }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /Process uploads/i }));
+    });
 
     await waitFor(() => {
       expect(global.fetch).toHaveBeenCalledWith(
@@ -267,7 +274,9 @@ describe("WorkspaceShell", () => {
       expect(screen.getByText(/Workspace persisted/i)).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByRole("button", { name: /Save answer/i }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /Save answer/i }));
+    });
 
     expect(
       screen.getAllByText(/strongest anticipatory bail arguments on these facts/i)
