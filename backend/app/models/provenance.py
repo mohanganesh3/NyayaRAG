@@ -4,7 +4,17 @@ from datetime import datetime
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
-from sqlalchemy import JSON, Boolean, DateTime, Enum, ForeignKey, Integer, String, Text
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    DateTime,
+    Enum,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base, JSONPayloadMixin, TimestampMixin, UUIDPrimaryKeyMixin
@@ -32,6 +42,29 @@ class IngestionRunStatus(StrEnum):
     PARTIAL = "partial"
 
 
+class SourcePartitionStatus(StrEnum):
+    DISCOVERING = "DISCOVERING"
+    RUNNING = "RUNNING"
+    VERIFIED = "VERIFIED"
+    BROKEN = "BROKEN"
+    BLOCKED_EXTERNALLY = "BLOCKED_EXTERNALLY"
+    DONE = "DONE"
+
+
+class ProvenanceTier(StrEnum):
+    OFFICIAL = "official"
+    GOV_MIRROR = "gov_mirror"
+    ARCHIVE_RESCUE = "archive_rescue"
+    OTHER = "other"
+
+
+class ArtifactPromotionState(StrEnum):
+    OFFICIAL = "official"
+    GOV_MIRROR_MATCHED = "gov_mirror_matched"
+    ARCHIVE_QUARANTINE = "archive_quarantine"
+    REJECTED = "rejected"
+
+
 class SourceRegistry(TimestampMixin, Base):
     __tablename__ = "source_registries"
 
@@ -54,6 +87,14 @@ class SourceRegistry(TimestampMixin, Base):
         default=ApprovalStatus.PENDING,
     )
     default_parser_version: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    collector_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    canonical_surfaces: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    mirror_surfaces: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    partition_scheme: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    expected_proof_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    auth_mode: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    critical: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    metadata_profile: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False, default=dict)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     documents: Mapped[list[LegalDocument]] = relationship(
@@ -62,6 +103,16 @@ class SourceRegistry(TimestampMixin, Base):
     )
     ingestion_runs: Mapped[list[IngestionRun]] = relationship(
         "IngestionRun",
+        back_populates="source_registry",
+        cascade="all, delete-orphan",
+    )
+    partitions: Mapped[list[SourcePartition]] = relationship(
+        "SourcePartition",
+        back_populates="source_registry",
+        cascade="all, delete-orphan",
+    )
+    artifact_provenance_entries: Mapped[list[ArtifactProvenance]] = relationship(
+        "ArtifactProvenance",
         back_populates="source_registry",
         cascade="all, delete-orphan",
     )
@@ -104,4 +155,108 @@ class IngestionRun(UUIDPrimaryKeyMixin, TimestampMixin, JSONPayloadMixin, Base):
     documents: Mapped[list[LegalDocument]] = relationship(
         "LegalDocument",
         back_populates="ingestion_run",
+    )
+    partitions: Mapped[list[SourcePartition]] = relationship(
+        "SourcePartition",
+        back_populates="ingestion_run",
+    )
+    artifact_provenance_entries: Mapped[list[ArtifactProvenance]] = relationship(
+        "ArtifactProvenance",
+        back_populates="ingestion_run",
+    )
+
+
+class SourcePartition(UUIDPrimaryKeyMixin, TimestampMixin, JSONPayloadMixin, Base):
+    __tablename__ = "source_partitions"
+    __table_args__ = (
+        UniqueConstraint(
+            "source_key",
+            "partition_key",
+            "surface_url",
+            name="uq_source_partitions_source_partition_surface",
+        ),
+    )
+
+    source_key: Mapped[str] = mapped_column(
+        ForeignKey("source_registries.source_key", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    ingestion_run_id: Mapped[str | None] = mapped_column(
+        ForeignKey("ingestion_runs.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    partition_key: Mapped[str] = mapped_column(String(255), nullable=False)
+    surface_url: Mapped[str] = mapped_column(String(1000), nullable=False)
+    partition_kind: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    expected_hint: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    discovered_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    ingested_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    status: Mapped[SourcePartitionStatus] = mapped_column(
+        Enum(SourcePartitionStatus, native_enum=False),
+        nullable=False,
+        default=SourcePartitionStatus.DISCOVERING,
+    )
+    last_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    error_class: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    proof_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    source_registry: Mapped[SourceRegistry] = relationship(
+        "SourceRegistry",
+        back_populates="partitions",
+    )
+    ingestion_run: Mapped[IngestionRun | None] = relationship(
+        "IngestionRun",
+        back_populates="partitions",
+    )
+
+
+class ArtifactProvenance(UUIDPrimaryKeyMixin, TimestampMixin, JSONPayloadMixin, Base):
+    __tablename__ = "artifact_provenance"
+
+    doc_id: Mapped[str | None] = mapped_column(
+        ForeignKey("legal_documents.doc_id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    source_key: Mapped[str | None] = mapped_column(
+        ForeignKey("source_registries.source_key", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    ingestion_run_id: Mapped[str | None] = mapped_column(
+        ForeignKey("ingestion_runs.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    canonical_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    mirror_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    retrieved_from: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    provenance_tier: Mapped[ProvenanceTier] = mapped_column(
+        Enum(ProvenanceTier, native_enum=False),
+        nullable=False,
+        default=ProvenanceTier.OFFICIAL,
+    )
+    sha256: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    mime_type: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    http_status: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    fetched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    promotion_state: Mapped[ArtifactPromotionState] = mapped_column(
+        Enum(ArtifactPromotionState, native_enum=False),
+        nullable=False,
+        default=ArtifactPromotionState.OFFICIAL,
+    )
+
+    document: Mapped[LegalDocument | None] = relationship(
+        "LegalDocument",
+        back_populates="artifact_provenance_entries",
+    )
+    source_registry: Mapped[SourceRegistry | None] = relationship(
+        "SourceRegistry",
+        back_populates="artifact_provenance_entries",
+    )
+    ingestion_run: Mapped[IngestionRun | None] = relationship(
+        "IngestionRun",
+        back_populates="artifact_provenance_entries",
     )

@@ -23,7 +23,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.base import Base, TimestampMixin
 
 if TYPE_CHECKING:
-    from app.models.provenance import IngestionRun, SourceRegistry
+    from app.models.provenance import ArtifactProvenance, IngestionRun, SourceRegistry
     from app.models.vector_store import VectorStorePoint
 
 
@@ -139,8 +139,21 @@ class LegalDocument(TimestampMixin, Base):
         ForeignKey("source_registries.source_key", ondelete="SET NULL"),
         nullable=True,
     )
+    title: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    date_text: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    decision_date: Mapped[date_value | None] = mapped_column(Date, nullable=True)
+    publication_date: Mapped[date_value | None] = mapped_column(Date, nullable=True)
     source_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     source_document_ref: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    collector_run_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    seed_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    detail_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    artifact_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    source_surface: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    provenance_tier: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    mime_type: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    is_ocr: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    ocr_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
     fetched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     checksum: Mapped[str | None] = mapped_column(String(255), nullable=True)
     parser_version: Mapped[str] = mapped_column(String(50), nullable=False, default="v0")
@@ -189,6 +202,10 @@ class LegalDocument(TimestampMixin, Base):
     ingestion_run: Mapped[IngestionRun | None] = relationship(
         "IngestionRun",
         back_populates="documents",
+    )
+    artifact_provenance_entries: Mapped[list[ArtifactProvenance]] = relationship(
+        "ArtifactProvenance",
+        cascade="all, delete-orphan",
     )
 
 

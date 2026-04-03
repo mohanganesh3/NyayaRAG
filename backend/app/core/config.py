@@ -25,6 +25,14 @@ class Settings(BaseSettings):
     razorpay_webhook_secret: str | None = None
     razorpay_plan_id_advocate_pro: str = "plan_advocate_pro"
     razorpay_plan_id_chamber_pro: str = "plan_chamber_pro"
+    qdrant_host: str = "localhost"
+    qdrant_port: int = 6333
+    qdrant_grpc_port: int = 6334
+    qdrant_collection_name: str = "nyayarag_documents"
+    neo4j_uri: str = "bolt://localhost:7687"
+    neo4j_user: str = "neo4j"
+    neo4j_password: str = "nyayarag_dev_password"
+    neo4j_database: str = "neo4j"
     llm_provider: str = "deterministic"
     anthropic_api_key: str | None = None
     anthropic_base_url: str = "https://api.anthropic.com/v1/messages"

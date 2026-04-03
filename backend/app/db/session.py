@@ -2,24 +2,57 @@ from collections.abc import Iterator
 from functools import lru_cache
 
 from app.core.config import Settings, get_settings
+from sqlalchemy import event
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 
 
-def _sqlite_connect_args(database_url: str) -> dict[str, bool]:
+def _sqlite_connect_args(database_url: str) -> dict[str, object]:
+    """SQLite connect_args tuned for long-running ingestion.
+
+    - check_same_thread=False: allow SQLAlchemy sessions across threads/tasks.
+    - timeout: wait on transient locks instead of failing fast with "database is locked".
+    """
+
     if database_url.startswith("sqlite"):
-        return {"check_same_thread": False}
+        return {
+            "check_same_thread": False,
+            # sqlite3 module timeout in seconds
+            "timeout": 60.0,
+        }
     return {}
 
 
+def _configure_sqlite_connection(dbapi_connection) -> None:
+    """Apply PRAGMAs that improve concurrency and integrity for SQLite."""
+
+    cursor = dbapi_connection.cursor()
+    try:
+        # Enforce FK constraints.
+        cursor.execute("PRAGMA foreign_keys=ON")
+        # Prefer WAL for better read/write concurrency.
+        cursor.execute("PRAGMA journal_mode=WAL")
+        # Reasonable durability/perf tradeoff for ingestion.
+        cursor.execute("PRAGMA synchronous=NORMAL")
+        # Busy timeout in milliseconds (separate from sqlite3 connect timeout).
+        cursor.execute("PRAGMA busy_timeout=60000")
+    finally:
+        cursor.close()
+
+
 def build_engine(database_url: str) -> Engine:
-    return create_engine(
+    engine = create_engine(
         database_url,
         pool_pre_ping=True,
         connect_args=_sqlite_connect_args(database_url),
     )
+
+    if database_url.startswith("sqlite"):
+        event.listen(engine, "connect", lambda dbapi_conn, _rec: _configure_sqlite_connection(dbapi_conn))
+
+    return engine
 
 
 @lru_cache

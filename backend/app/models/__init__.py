@@ -29,7 +29,17 @@ from app.models.legal import (
     StatuteSection,
     ValidityStatus,
 )
-from app.models.provenance import IngestionRun, IngestionRunStatus, SourceRegistry, SourceType
+from app.models.provenance import (
+    ArtifactPromotionState,
+    ArtifactProvenance,
+    IngestionRun,
+    IngestionRunStatus,
+    ProvenanceTier,
+    SourcePartition,
+    SourcePartitionStatus,
+    SourceRegistry,
+    SourceType,
+)
 from app.models.system import (
     BackgroundTaskRun,
     QueryHistoryEntry,
@@ -47,6 +57,8 @@ __all__ = [
     "AppealNode",
     "AppealOutcome",
     "ApprovalStatus",
+    "ArtifactPromotionState",
+    "ArtifactProvenance",
     "BackgroundTaskRun",
     "BillingInvoice",
     "BillingInvoiceStatus",
@@ -69,8 +81,11 @@ __all__ = [
     "QueryHistoryEntry",
     "IngestionRun",
     "IngestionRunStatus",
+    "ProvenanceTier",
     "RuntimeSetting",
     "SavedWorkspaceAnswer",
+    "SourcePartition",
+    "SourcePartitionStatus",
     "SourceRegistry",
     "SourceType",
     "StatuteAmendment",

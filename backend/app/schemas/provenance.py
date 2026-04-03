@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.models import ApprovalStatus, IngestionRunStatus, SourceType
 
@@ -22,6 +22,14 @@ class SourceRegistryRead(BaseModel):
     is_active: bool
     approval_status: ApprovalStatus
     default_parser_version: str | None = None
+    collector_type: str | None = None
+    canonical_surfaces: list[str] = Field(default_factory=list)
+    mirror_surfaces: list[str] = Field(default_factory=list)
+    partition_scheme: str | None = None
+    expected_proof_type: str | None = None
+    auth_mode: str | None = None
+    critical: bool = True
+    metadata_profile: dict[str, object] = Field(default_factory=dict)
     notes: str | None = None
 
 

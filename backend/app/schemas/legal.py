@@ -131,8 +131,21 @@ class LegalDocumentRead(BaseModel):
     language: str
     full_text: str | None = None
     source_system: str | None = None
+    title: str | None = None
+    date_text: str | None = None
+    decision_date: date_value | None = None
+    publication_date: date_value | None = None
     source_url: str | None = None
     source_document_ref: str | None = None
+    collector_run_id: str | None = None
+    seed_url: str | None = None
+    detail_url: str | None = None
+    artifact_url: str | None = None
+    source_surface: str | None = None
+    provenance_tier: str | None = None
+    mime_type: str | None = None
+    is_ocr: bool | None = None
+    ocr_confidence: float | None = None
     fetched_at: datetime | None = None
     checksum: str | None = None
     parser_version: str
