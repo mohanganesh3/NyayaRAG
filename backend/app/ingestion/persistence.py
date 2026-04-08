@@ -14,14 +14,17 @@ from app.ingestion.contracts import (
     ProjectionPlan,
     ProjectionTarget,
 )
+from app.ingestion.collector_utils import ensure_collection_control_schema, record_artifact_provenance
 from app.ingestion.source_catalog import SOURCE_CATALOG
 from app.models import (
     ApprovalStatus,
+    ArtifactPromotionState,
     DocumentChunk,
     IngestionRun,
     IngestionRunStatus,
     LegalDocument,
     LegalDocumentType,
+    ProvenanceTier,
     SourceRegistry,
     SourceType,
     StatuteAmendment,
@@ -45,6 +48,7 @@ class CanonicalIngestionPersister:
         result: IngestionExecutionResult,
         context: IngestionJobContext,
     ) -> PersistedIngestionResult:
+        ensure_collection_control_schema(session)
         registry = self._ensure_source_registry(session, context)
         ingestion_run = IngestionRun(
             source_registry=registry,
@@ -118,7 +122,6 @@ class CanonicalIngestionPersister:
             )
             session.add(registry)
             session.flush()
-            return registry
 
         if entry is not None:
             registry.display_name = entry.display_name
@@ -129,6 +132,45 @@ class CanonicalIngestionPersister:
             registry.access_method = entry.access_method
             registry.default_parser_version = entry.default_parser_version
             registry.approval_status = entry.approval_status
+            registry.collector_type = entry.collector_type or entry.access_method
+            registry.canonical_surfaces = list(entry.canonical_surfaces or [entry.base_url])
+            registry.mirror_surfaces = list(entry.mirror_surfaces or [])
+            registry.partition_scheme = entry.partition_scheme
+            registry.expected_proof_type = entry.expected_proof_type or "count_and_metadata"
+            registry.auth_mode = entry.auth_mode or "public"
+            registry.critical = bool(entry.critical)
+            registry.metadata_profile = dict(entry.metadata_profile or {})
+        else:
+            registry.collector_type = self._as_optional_str(
+                context.metadata.get("collector_type")
+            ) or registry.collector_type
+            registry.canonical_surfaces = (
+                self._as_str_list(context.metadata.get("canonical_surfaces"))
+                or registry.canonical_surfaces
+                or [context.source_url]
+            )
+            registry.mirror_surfaces = (
+                self._as_str_list(context.metadata.get("mirror_surfaces"))
+                or registry.mirror_surfaces
+            )
+            registry.partition_scheme = self._as_optional_str(
+                context.metadata.get("partition_scheme")
+            ) or registry.partition_scheme
+            registry.expected_proof_type = self._as_optional_str(
+                context.metadata.get("expected_proof_type")
+            ) or registry.expected_proof_type
+            registry.auth_mode = self._as_optional_str(context.metadata.get("auth_mode")) or registry.auth_mode
+            critical_raw = context.metadata.get("critical")
+            if critical_raw is not None:
+                registry.critical = bool(critical_raw)
+            if isinstance(context.metadata.get("metadata_profile"), dict):
+                registry.metadata_profile = dict(context.metadata["metadata_profile"])
+        if not registry.canonical_surfaces:
+            registry.canonical_surfaces = [context.source_url]
+        if registry.expected_proof_type is None:
+            registry.expected_proof_type = "count_and_metadata"
+        if registry.auth_mode is None:
+            registry.auth_mode = "public"
         return registry
 
     def _persist_document(
@@ -150,7 +192,11 @@ class CanonicalIngestionPersister:
         doc_id = str(
             uuid5(
                 NAMESPACE_URL,
-                f"{context.source_key}|{metadata.source_document_ref}|{result.fetched.checksum}",
+                (
+                    f"{context.source_key}|{metadata.source_document_ref}"
+                    if metadata.source_document_ref
+                    else f"{context.source_key}|{result.fetched.checksum}"
+                ),
             )
         )
 
@@ -161,7 +207,10 @@ class CanonicalIngestionPersister:
             session.flush()
 
         date_text = document_payload.get("date") or metadata.date_text
+        title_text = self._as_optional_str(document_payload.get("title")) or parsed.title
         legal_document.doc_type = metadata.doc_type
+        legal_document.title = title_text
+        legal_document.date_text = self._as_optional_str(date_text)
         legal_document.court = (
             self._as_optional_str(document_payload.get("court")) or metadata.court
         )
@@ -170,6 +219,15 @@ class CanonicalIngestionPersister:
             len(metadata.bench) or None
         )
         legal_document.date = self._parse_date(date_text)
+        legal_document.decision_date = (
+            self._parse_date(document_payload.get("decision_date"))
+            or self._parse_date(metadata_attrs.get("decision_date"))
+            or legal_document.date
+        )
+        legal_document.publication_date = (
+            self._parse_date(document_payload.get("publication_date"))
+            or self._parse_date(metadata_attrs.get("publication_date"))
+        )
         legal_document.citation = (
             self._as_optional_str(document_payload.get("citation")) or metadata.citation
         )
@@ -221,17 +279,41 @@ class CanonicalIngestionPersister:
         legal_document.source_registry = registry
         legal_document.source_url = context.source_url
         legal_document.source_document_ref = metadata.source_document_ref
+        legal_document.collector_run_id = ingestion_run.id
+        legal_document.seed_url = (
+            self._as_optional_str(context.metadata.get("seed_url"))
+            or self._first_str(context.metadata.get("seed_urls"))
+        )
+        legal_document.detail_url = self._as_optional_str(context.metadata.get("detail_url"))
+        legal_document.artifact_url = (
+            self._as_optional_str(context.metadata.get("artifact_url")) or context.source_url
+        )
+        legal_document.source_surface = (
+            self._as_optional_str(context.metadata.get("source_surface"))
+            or self._as_optional_str(context.metadata.get("surface"))
+        )
+        provenance_tier = (
+            self._as_optional_str(context.metadata.get("provenance_tier")) or "official"
+        )
+        legal_document.provenance_tier = provenance_tier
+        legal_document.mime_type = result.fetched.content_type
+        legal_document.is_ocr = self._as_optional_bool(context.metadata.get("is_ocr")) or False
+        legal_document.ocr_confidence = self._as_optional_float(
+            context.metadata.get("ocr_confidence")
+        )
         legal_document.fetched_at = result.fetched.fetched_at
         legal_document.checksum = result.fetched.checksum
         legal_document.parser_version = context.parser_version
         legal_document.ingestion_run = ingestion_run
         legal_document.approval_status = registry.approval_status
 
-        legal_document.appeal_history.clear()
-        legal_document.chunks.clear()
-        if legal_document.statute_document is not None:
-            legal_document.statute_document.sections.clear()
-            legal_document.statute_document = None
+        # Avoid destructive clears when running in "document-only" / skip-chunk modes.
+        # If a run produced no chunks or appeal links, keep any existing projections.
+        if result.appeal_links:
+            legal_document.appeal_history.clear()
+
+        if result.chunks:
+            legal_document.chunks.clear()
 
         chunk_overrides = self._as_object_dict(projection_payload.get("chunks"))
         for chunk in result.chunks:
@@ -243,9 +325,33 @@ class CanonicalIngestionPersister:
             self._as_object_dict(projection_payload.get("statute_document"))
         )
         if statute_payload:
+            if legal_document.statute_document is not None:
+                legal_document.statute_document.sections.clear()
             legal_document.statute_document = self._build_statute_document(doc_id, statute_payload)
 
         session.flush()
+        record_artifact_provenance(
+            session,
+            doc_id=doc_id,
+            source_key=context.source_key,
+            canonical_url=legal_document.artifact_url or legal_document.source_url,
+            mirror_url=self._as_optional_str(context.metadata.get("mirror_url")),
+            retrieved_from=context.source_url,
+            provenance_tier=ProvenanceTier(provenance_tier),
+            sha256=result.fetched.checksum,
+            mime_type=result.fetched.content_type,
+            http_status=self._as_optional_int(context.metadata.get("http_status")),
+            fetched_at=result.fetched.fetched_at,
+            promotion_state=ArtifactPromotionState(
+                self._as_optional_str(context.metadata.get("promotion_state")) or "official"
+            ),
+            ingestion_run_id=ingestion_run.id,
+            payload={
+                "source_surface": legal_document.source_surface,
+                "detail_url": legal_document.detail_url,
+                "seed_url": legal_document.seed_url,
+            },
+        )
         return doc_id
 
     def _build_chunk(
@@ -407,10 +513,30 @@ class CanonicalIngestionPersister:
             return int(value)
         return None
 
+    def _as_optional_float(self, value: object) -> float | None:
+        if value is None:
+            return None
+        if isinstance(value, (int, float)):
+            return float(value)
+        if isinstance(value, str):
+            try:
+                return float(value.strip())
+            except ValueError:
+                return None
+        return None
+
     def _as_str_list(self, value: object) -> list[str]:
         if isinstance(value, list):
             return [str(item) for item in value]
         return []
+
+    def _first_str(self, value: object) -> str | None:
+        if isinstance(value, list):
+            for item in value:
+                text = self._as_optional_str(item)
+                if text:
+                    return text
+        return None
 
     def _as_str_dict(self, value: object) -> dict[str, str]:
         if isinstance(value, dict):

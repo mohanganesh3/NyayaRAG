@@ -157,31 +157,20 @@ class SupremeCourtHtmlAdapter(BaseIngestionAdapter):
         metadata: ExtractedMetadata,
         context: IngestionJobContext,
     ) -> list[CitationCandidate]:
-        candidates: list[CitationCandidate] = []
-        seen: set[tuple[str | None, str | None]] = set()
+        from app.ingestion.sentinel import StrictCitationSentinel
+        sentinel = StrictCitationSentinel()
+        
+        all_candidates: list[CitationCandidate] = []
         for paragraph in parsed.paragraphs:
-            citation_match = _CITATION_PATTERN.search(paragraph)
-            if citation_match is None:
-                continue
-            case_match = _CASE_PATTERN.search(paragraph)
-            if case_match is None and citation_match.group(1) == metadata.citation:
-                continue
-            key = (
-                case_match.group(1) if case_match else None,
-                citation_match.group(1),
-            )
-            if key in seen:
-                continue
-            seen.add(key)
-            candidates.append(
-                CitationCandidate(
-                    raw_text=paragraph,
-                    case_name=case_match.group(1) if case_match else None,
-                    citation_text=citation_match.group(1),
-                    citation_type="refers_to",
-                )
-            )
-        return candidates
+            candidates = sentinel.extract_all(paragraph)
+            for candidate in candidates:
+                # Filter out citations that refer to the document itself
+                if candidate.citation_text == metadata.citation or \
+                   candidate.citation_text == metadata.neutral_citation:
+                    continue
+                all_candidates.append(candidate)
+        
+        return all_candidates
 
     def resolve_appeal_links(
         self,

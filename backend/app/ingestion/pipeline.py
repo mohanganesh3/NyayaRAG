@@ -12,6 +12,9 @@ class IngestionPipelineRunner:
         self,
         adapter: BaseIngestionAdapter,
         context: IngestionJobContext,
+        *,
+        skip_chunking: bool = False,
+        skip_embedding: bool = False,
     ) -> IngestionExecutionResult:
         stage_trace: list[str] = []
 
@@ -33,11 +36,19 @@ class IngestionPipelineRunner:
         appeal_links = adapter.resolve_appeal_links(parsed, metadata, citations, context)
         stage_trace.append("resolve_appeal_links")
 
-        chunks = adapter.chunk(parsed, metadata, context)
-        stage_trace.append("chunk")
+        if skip_chunking:
+            chunks = []
+            stage_trace.append("chunk_skipped")
+        else:
+            chunks = adapter.chunk(parsed, metadata, context)
+            stage_trace.append("chunk")
 
-        embedding_tasks = adapter.embed(chunks, metadata, context)
-        stage_trace.append("embed")
+        if skip_chunking or skip_embedding:
+            embedding_tasks = []
+            stage_trace.append("embed_skipped")
+        else:
+            embedding_tasks = adapter.embed(chunks, metadata, context)
+            stage_trace.append("embed")
 
         projections = adapter.project(
             metadata,
