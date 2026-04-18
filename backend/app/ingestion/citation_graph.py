@@ -129,27 +129,87 @@ class CitationGraphProjector:
         session: Session,
         candidate: CitationCandidate,
     ) -> LegalDocument | None:
-        if candidate.citation_text:
-            direct_match = session.scalar(
-                select(LegalDocument).where(
-                    (LegalDocument.citation == candidate.citation_text)
-                    | (LegalDocument.neutral_citation == candidate.citation_text)
-                    | (LegalDocument.source_document_ref == candidate.citation_text)
-                )
-            )
-            if direct_match is not None:
-                return direct_match
-
-        if not candidate.case_name:
+        """
+        Gold-Standard resolver using citation_lookup table with normalized comparison.
+        Eliminates the 24K-duplicate ambiguity bug via is_canonical flag + court hint.
+        """
+        from app.ingestion.sentinel import normalize_citation
+        if not candidate.citation_text:
             return None
 
-        normalized_case_name = self._normalize_case_name(candidate.case_name)
-        documents = session.scalars(select(LegalDocument)).all()
-        for document in documents:
-            rendered = self._document_case_name(document)
-            if rendered and self._normalize_case_name(rendered) == normalized_case_name:
-                return document
+        # Normalize the candidate citation (sentinel already does this, but defensive)
+        norm = normalize_citation(candidate.citation_text)
+        if not norm:
+            return None
+
+        # 1. Query the citation_lookup table — canonical entries first
+        from sqlalchemy import text as sql_text
+        rows = session.execute(
+            sql_text("""
+                SELECT doc_id, court, is_canonical
+                FROM citation_lookup
+                WHERE citation_normalized = :norm
+                ORDER BY is_canonical DESC
+            """),
+            {"norm": norm}
+        ).fetchall()
+
+        if not rows:
+            return None
+
+        # Unambiguous single match
+        if len(rows) == 1:
+            doc = session.get(LegalDocument, rows[0][0])
+            return doc
+
+        # Prefer canonical entries
+        canonical = [r for r in rows if r[2]]
+        if len(canonical) == 1:
+            return session.get(LegalDocument, canonical[0][0])
+
+        # Use court hint from journal prefix to disambiguate
+        court_hint = self._journal_to_court_class(norm)
+        if court_hint:
+            court_matches = [r for r in canonical if court_hint in (r[1] or '').lower()]
+            if len(court_matches) == 1:
+                return session.get(LegalDocument, court_matches[0][0])
+
+        # Truly ambiguous: Zero-Mistake mandate → reject
         return None
+
+    def _journal_to_court_class(self, citation: str) -> str | None:
+        """Maps citation journal prefix to expected court string fragment."""
+        c = citation.lower()
+        if 'scc' in c or 'scr' in c or 'insc' in c or ('air' in c and ' sc ' in c):
+            return 'supreme court'
+        if 'air mad' in c or 'tnhc' in c or 'mhc' in c:
+            return 'madras'
+        if 'air bom' in c or 'bhc' in c:
+            return 'bombay'
+        if 'air del' in c or 'dhc' in c:
+            return 'delhi'
+        if 'air cal' in c or 'chc' in c:
+            return 'calcutta'
+        if 'air all' in c or 'ahc' in c:
+            return 'allahabad'
+        return None
+
+    def _verify_court_match(self, citation_text: str, target_court: str | None) -> bool:
+        """
+        Ensures the citation journal actually belongs to the court of the target document.
+        Example: An 'AIR SC' citation must not link to a 'High Court' document.
+        """
+        if not target_court:
+            return True # Assume valid if target court is missing (loose but safe-ish)
+        
+        court_lower = target_court.lower()
+        cit_upper = citation_text.upper()
+
+        if "SC" in cit_upper or "INSC" in cit_upper or "SCC" in cit_upper or "SCR" in cit_upper:
+            return "supreme court" in court_lower
+        
+        # Add High Court specific checks if journal implies a specific HC
+        return True
 
     def get_neighbors(
         self,
