@@ -15,6 +15,7 @@ class ModelTask(StrEnum):
     PLACEHOLDER_GENERATION = "placeholder_generation"
     AGENTIC_PLANNING = "agentic_planning"
     AGENTIC_SYNTHESIS = "agentic_synthesis"
+    NLI_VERIFICATION = "nli_verification"
 
 
 class ModelRuntimeError(RuntimeError):
@@ -140,6 +141,7 @@ def build_task_model_client(task: ModelTask) -> JSONTaskModelClient | None:
         ModelTask.PLACEHOLDER_GENERATION: settings.anthropic_generation_model,
         ModelTask.AGENTIC_PLANNING: settings.anthropic_planner_model,
         ModelTask.AGENTIC_SYNTHESIS: settings.anthropic_synthesis_model,
+        ModelTask.NLI_VERIFICATION: settings.anthropic_generation_model,  # Reuse gen model for NLI
     }[task]
     if not settings.anthropic_api_key:
         raise ModelRuntimeError(

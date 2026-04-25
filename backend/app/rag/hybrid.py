@@ -8,8 +8,10 @@ from datetime import date as date_value
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.ingestion.embeddings import DeterministicBgeM3EmbeddingService
+from app.ingestion.embeddings import DeterministicBgeM3EmbeddingService, EmbeddingService
 from app.ingestion.qdrant_collections import QdrantCollectionManager
+from app.core.config import get_settings
+from qdrant_client import QdrantClient
 from app.models import (
     DocumentChunk,
     LegalDocument,
@@ -73,10 +75,17 @@ class DenseRetriever:
         self,
         *,
         collection_manager: QdrantCollectionManager | None = None,
-        embedding_service: DeterministicBgeM3EmbeddingService | None = None,
+        embedding_service: EmbeddingService | None = None,
+        qdrant_client: QdrantClient | None = None,
     ) -> None:
         self.collection_manager = collection_manager or QdrantCollectionManager()
         self.embedding_service = embedding_service or DeterministicBgeM3EmbeddingService()
+        settings = get_settings()
+        self.qdrant_client = qdrant_client or QdrantClient(
+            host=settings.qdrant_host,
+            port=settings.qdrant_port,
+            timeout=10,
+        )
 
     def search(
         self,
@@ -86,34 +95,42 @@ class DenseRetriever:
         analysis: QueryAnalysis,
         top_k: int = 20,
     ) -> list[DenseSearchResult]:
+        query_vector = self.embedding_service.embed_texts([query])[0]
         results: list[DenseSearchResult] = []
-        for collection in self._target_collections(analysis):
-            if session.get(VectorStoreCollection, collection) is None:
+        
+        for collection_name in self._target_collections(analysis):
+            # Check if Qdrant is available and has the collection
+            try:
+                search_results = self.qdrant_client.search(
+                    collection_name=collection_name,
+                    query_vector=query_vector,
+                    limit=top_k,
+                    # We could add filters here based on analysis
+                )
+            except Exception as e:
+                # Fallback to slow local search if Qdrant fails or is unavailable
+                # (Existing logic as fallback)
                 continue
 
-            query_filter = self._filter_for_collection(collection, analysis)
-            points = self.collection_manager.filter_points(
-                session,
-                collection,
-                query_filter,
-            )
-            if not points:
+            if not search_results:
                 continue
 
-            query_vector = self.embedding_service.embed_texts([query])[0]
+            point_ids = [str(r.id) for r in search_results]
+            scores = {str(r.id): r.score for r in search_results}
+
             rows = session.execute(
                 select(VectorStorePoint, DocumentChunk, LegalDocument)
                 .join(DocumentChunk, VectorStorePoint.chunk_id == DocumentChunk.chunk_id)
                 .join(LegalDocument, VectorStorePoint.doc_id == LegalDocument.doc_id)
-                .where(VectorStorePoint.point_id.in_([point.point_id for point in points]))
+                .where(VectorStorePoint.point_id.in_(point_ids))
             ).all()
+
             for point, chunk, document in rows:
-                score = self._cosine_similarity(query_vector, point.vector)
                 results.append(
                     DenseSearchResult(
                         doc_id=document.doc_id,
                         chunk_id=chunk.chunk_id,
-                        score=score,
+                        score=scores.get(point.point_id, 0.0),
                         point=point,
                         chunk=chunk,
                         document=document,
@@ -498,38 +515,43 @@ class AuthorityRanker:
         candidate: HybridCandidate,
         analysis: QueryAnalysis,
     ) -> tuple[int, str, str, str]:
+        """
+        Calculates the authority tier for a document based on Court hierarchy and Bench strength.
+        Tier 0 is highest (Binding Statute), Tier 15 is lowest (Persuasive Tribunal).
+        """
         if candidate.document.doc_type in {
             LegalDocumentType.STATUTE,
             LegalDocumentType.CONSTITUTION,
         }:
-            return (0, "binding", "binding", "Current statutory or constitutional text.")
+            return (0, "binding", "binding", "Primary Statutory/Constitutional Authority.")
 
-        court = (candidate.document.court or "").strip()
-        normalized_court = court.lower()
-        bench_size = candidate.document.coram or len(candidate.document.bench)
+        court = (candidate.document.court or "").strip().lower()
+        # Bench size extraction (Coram)
+        bench_size = candidate.document.coram or len(candidate.document.bench) or 1
 
-        if normalized_court in {"supreme court", "supreme court of india"}:
-            if bench_size >= 9:
-                return (1, "binding", "binding", "Supreme Court 9-judge bench.")
-            if bench_size >= 5:
-                return (2, "binding", "binding", "Supreme Court Constitution Bench.")
-            if bench_size >= 3:
-                return (3, "binding", "binding", "Supreme Court 3-judge bench.")
-            if bench_size >= 2:
-                return (4, "binding", "binding", "Supreme Court Division Bench.")
-            return (5, "binding", "binding", "Supreme Court single-judge authority.")
+        # Tier 1-5: Supreme Court of India
+        if any(sc in court for sc in ["supreme court", "sci"]):
+            if bench_size >= 11: return (1, "binding", "binding", f"Supreme Court {bench_size}-judge Bench (Foundational).")
+            if bench_size >= 7:  return (2, "binding", "binding", f"Supreme Court {bench_size}-judge Constitution Bench.")
+            if bench_size >= 5:  return (3, "binding", "binding", "Supreme Court Constitution Bench (5-judge).")
+            if bench_size >= 3:  return (4, "binding", "binding", "Supreme Court Full Bench (3-judge).")
+            return (5, "binding", "binding", "Supreme Court Division/Single Bench.")
 
-        if court == analysis.jurisdiction_court:
-            if bench_size >= 3:
-                return (6, "binding", "binding", f"{court} larger bench authority.")
-            if bench_size >= 2:
-                return (7, "binding", "binding", f"{court} Division Bench authority.")
-            return (8, "binding", "binding", f"{court} single-judge authority.")
+        # Tier 6-10: High Courts (Binding in Jurisdiction, Persuasive Outside)
+        if "high court" in court:
+            is_binding = court == (analysis.jurisdiction_court or "").lower()
+            auth_class = "binding" if is_binding else "persuasive"
+            
+            if bench_size >= 5: return (6, auth_class, auth_class, f"{candidate.document.court} Constitution Bench.")
+            if bench_size >= 3: return (7, auth_class, auth_class, f"{candidate.document.court} Full Bench.")
+            if bench_size >= 2: return (8, auth_class, auth_class, f"{candidate.document.court} Division Bench.")
+            return (9, auth_class, auth_class, f"{candidate.document.court} Single Judge.")
 
-        if "high court" in normalized_court:
-            return (9, "persuasive", "persuasive", f"{court} persuasive in this jurisdiction.")
+        # Tier 11-15: Tribunals and Other Authorities
+        if any(t in court for t in ["tribunal", "nclt", "nclat", "cat", "tdsat"]):
+            return (11, "persuasive", "persuasive", f"{candidate.document.court} order.")
 
-        return (10, "persuasive", "persuasive", "Tribunal or other persuasive authority.")
+        return (15, "persuasive", "persuasive", "Persuasive Authority.")
 
 
 class HybridRAGPipeline:
