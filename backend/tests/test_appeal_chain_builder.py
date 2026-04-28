@@ -221,7 +221,10 @@ def _seed_trial_document(session: Session) -> None:
     )
 
 
-def test_multi_level_appeal_chain_resolves_final_authority(tmp_path) -> None:
+def test_multi_level_appeal_chain_resolves_final_authority(
+    tmp_path,
+    ensure_source_registry,
+) -> None:
     database_url = f"sqlite+pysqlite:///{tmp_path / 'appeal_chain.db'}"
     engine = build_engine(database_url)
     Base.metadata.create_all(engine)
@@ -230,6 +233,9 @@ def test_multi_level_appeal_chain_resolves_final_authority(tmp_path) -> None:
     orchestrator = IngestionOrchestrator(appeal_chain_builder=builder)
 
     with Session(engine) as session:
+        ensure_source_registry(session, "district-court")
+        ensure_source_registry(session, "bombay_high_court")
+        ensure_source_registry(session, "supreme_court")
         _seed_trial_document(session)
         session.commit()
 
@@ -333,7 +339,10 @@ def test_multi_level_appeal_chain_resolves_final_authority(tmp_path) -> None:
     engine.dispose()
 
 
-def test_modified_appeal_resolution_surfaces_warning(tmp_path) -> None:
+def test_modified_appeal_resolution_surfaces_warning(
+    tmp_path,
+    ensure_source_registry,
+) -> None:
     database_url = f"sqlite+pysqlite:///{tmp_path / 'appeal_chain_modified.db'}"
     engine = build_engine(database_url)
     Base.metadata.create_all(engine)
@@ -342,6 +351,8 @@ def test_modified_appeal_resolution_surfaces_warning(tmp_path) -> None:
     orchestrator = IngestionOrchestrator(appeal_chain_builder=builder)
 
     with Session(engine) as session:
+        ensure_source_registry(session, "district-court")
+        ensure_source_registry(session, "supreme_court")
         _seed_trial_document(session)
         session.commit()
 

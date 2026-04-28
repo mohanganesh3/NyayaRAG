@@ -8,10 +8,12 @@ from app.db.base import Base
 from app.db.session import build_engine
 from app.models import (
     ApprovalStatus,
+    ArtifactProvenance,
     IngestionRun,
     IngestionRunStatus,
     LegalDocument,
     LegalDocumentType,
+    SourcePartition,
     SourceRegistry,
     SourceType,
     ValidityStatus,
@@ -32,6 +34,8 @@ def _make_alembic_config(database_url: str) -> Config:
 def test_provenance_model_imports_are_stable() -> None:
     assert SourceRegistry.__tablename__ == "source_registries"
     assert IngestionRun.__tablename__ == "ingestion_runs"
+    assert SourcePartition.__tablename__ == "source_partitions"
+    assert ArtifactProvenance.__tablename__ == "artifact_provenance"
 
 
 def test_legal_document_can_be_traced_to_source_registry_and_ingestion_run(tmp_path) -> None:
@@ -53,6 +57,14 @@ def test_legal_document_can_be_traced_to_source_registry_and_ingestion_run(tmp_p
             is_active=True,
             approval_status=ApprovalStatus.APPROVED,
             default_parser_version="sc-judgment-parser-v1",
+            collector_type="api_feed",
+            canonical_surfaces=["https://api.sci.gov.in/judis"],
+            mirror_surfaces=["https://www.sci.gov.in"],
+            partition_scheme="year_x_surface",
+            expected_proof_type="count_and_metadata",
+            auth_mode="public",
+            critical=True,
+            metadata_profile={"title": "required"},
             notes="Primary source for Supreme Court judgments.",
         )
         ingestion_run = IngestionRun(
@@ -91,6 +103,14 @@ def test_legal_document_can_be_traced_to_source_registry_and_ingestion_run(tmp_p
             language="en",
             full_text="Judgment text",
             source_registry=source_registry,
+            title="X v Union of India",
+            date_text="2026-01-01",
+            collector_run_id="collector-run-1",
+            artifact_url="https://www.sci.gov.in/judgment/2026-1-scc-1.pdf",
+            source_surface="https://api.sci.gov.in/judis",
+            provenance_tier="official",
+            mime_type="application/pdf",
+            is_ocr=False,
             source_url="https://www.sci.gov.in/judgment/2026-1-scc-1",
             source_document_ref="SCI-2026-0001",
             checksum="sha256:abc123",
@@ -128,9 +148,11 @@ def test_legal_document_can_be_traced_to_source_registry_and_ingestion_run(tmp_p
         assert source_read.display_name == "Supreme Court of India"
         assert run_read.status is IngestionRunStatus.SUCCEEDED
         assert document_read.source_url == "https://www.sci.gov.in/judgment/2026-1-scc-1"
+        assert document_read.artifact_url == "https://www.sci.gov.in/judgment/2026-1-scc-1.pdf"
         assert document_read.checksum == "sha256:abc123"
         assert document_read.source_registry is not None
         assert document_read.source_registry.source_key == "supremecourt.gov.in"
+        assert document_read.source_registry.collector_type == "api_feed"
         assert document_read.ingestion_run is not None
         assert document_read.ingestion_run.parser_version == "sc-judgment-parser-v1"
 
@@ -148,6 +170,8 @@ def test_alembic_head_contains_provenance_tables_and_legal_document_fks(tmp_path
 
     assert "source_registries" in table_names
     assert "ingestion_runs" in table_names
+    assert "source_partitions" in table_names
+    assert "artifact_provenance" in table_names
 
     foreign_tables = {
         foreign_key["referred_table"]

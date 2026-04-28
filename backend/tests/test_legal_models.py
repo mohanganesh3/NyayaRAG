@@ -82,7 +82,7 @@ def test_legal_models_round_trip_and_serialize(tmp_path) -> None:
             practice_areas=["criminal"],
             language="en",
             full_text="Section 101 defines murder under the Bharatiya Nyaya Sanhita.",
-            source_system="indiacode.nic.in",
+            source_system=None,
             parser_version="v1",
             approval_status=ApprovalStatus.APPROVED,
             statute_document=StatuteDocument(
@@ -143,7 +143,7 @@ def test_legal_models_round_trip_and_serialize(tmp_path) -> None:
             practice_areas=["criminal"],
             language="en",
             full_text="The Court reiterated that bail is the rule.",
-            source_system="supremecourt.gov.in",
+            source_system=None,
             parser_version="v1",
             approval_status=ApprovalStatus.APPROVED,
         )
@@ -172,7 +172,7 @@ def test_legal_models_round_trip_and_serialize(tmp_path) -> None:
             practice_areas=["criminal", "procedure"],
             language="en",
             full_text="A later bench must ensure only final authorities are cited.",
-            source_system="supremecourt.gov.in",
+            source_system=None,
             source_url="https://www.sci.gov.in/judgment/2025-4-scc-101",
             parser_version="v2",
             approval_status=ApprovalStatus.APPROVED,

@@ -11,6 +11,12 @@ from app.ingestion.embeddings import DeterministicBgeM3EmbeddingService
 from app.models import DocumentChunk
 from app.rag.lexical import LegalTokenizer
 from app.rag.resolution import CitationResolutionStatus, ResolvedPlaceholder
+from app.services.model_runtime import (
+    JSONTaskModelClient,
+    ModelRuntimeError,
+    ModelTask,
+    build_task_model_client,
+)
 
 _NEGATION_TOKENS = {"cannot", "denied", "fails", "never", "no", "none", "not", "without"}
 _CONTENT_STOPWORDS = {
@@ -129,6 +135,7 @@ class MisgroundingChecker:
         tokenizer: LegalTokenizer | None = None,
         embedding_service: DeterministicBgeM3EmbeddingService | None = None,
         entailment_classifier: DeterministicEntailmentClassifier | None = None,
+        model_client: JSONTaskModelClient | None = None,
         verified_threshold: float = 0.82,
         uncertain_threshold: float = 0.55,
     ) -> None:
@@ -137,6 +144,7 @@ class MisgroundingChecker:
         self.entailment_classifier = entailment_classifier or DeterministicEntailmentClassifier(
             tokenizer=self.tokenizer
         )
+        self._model_client = model_client or build_task_model_client(ModelTask.NLI_VERIFICATION)
         self.verified_threshold = verified_threshold
         self.uncertain_threshold = uncertain_threshold
 
@@ -187,10 +195,21 @@ class MisgroundingChecker:
 
         best_passage = passages[0]
         similarity = self._semantic_similarity(claim, best_passage.text)
+        
+        # Step 1: Deterministic Check (Fast)
         entailment = self.entailment_classifier.classify(
             premise=best_passage.text,
             hypothesis=claim,
         )
+
+        # Step 2: LLM Arbiter (Slow/Precise) - Fallback for Uncertain or Contradictory cases
+        if (entailment is not EntailmentLabel.ENTAILMENT or similarity < self.verified_threshold) and self._model_client:
+            try:
+                llm_entailment = self._verify_with_model(premise=best_passage.text, hypothesis=claim)
+                if llm_entailment:
+                    entailment = llm_entailment
+            except ModelRuntimeError:
+                pass # Fallback to deterministic result
 
         if entailment is EntailmentLabel.CONTRADICTION:
             return MisgroundingResult(
@@ -250,6 +269,28 @@ class MisgroundingChecker:
             citation=resolution.citation,
             message="Cited authority does not support the claim as stated.",
         )
+
+    def _verify_with_model(self, *, premise: str, hypothesis: str) -> EntailmentLabel | None:
+        """
+        Uses Claude 4.6 as a final arbiter for NLI entailment.
+        """
+        if not self._model_client:
+            return None
+            
+        response = self._model_client.generate_json(
+            system_prompt=(
+                "You are a legal verification assistant. "
+                "Classify whether the premise ENTAILS, CONTRADICTS, or is NEUTRAL to the hypothesis. "
+                'Return JSON: {"label": "ENTAILMENT" | "CONTRADICTION" | "NEUTRAL"}'
+            ),
+            user_prompt=f"Premise: {premise}\nHypothesis: {hypothesis}",
+            max_tokens=200
+        )
+        label_str = response.get("label")
+        try:
+            return EntailmentLabel(str(label_str).upper())
+        except ValueError:
+            return None
 
     def retrieve_within_doc(
         self,

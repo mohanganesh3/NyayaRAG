@@ -62,19 +62,23 @@ def _seed_judgment(
             practice_areas=["constitutional"],
             language="en",
             full_text="Seed judgment text.",
-            source_system="supremecourt.gov.in",
+            source_system="supreme_court",
             parser_version="seed-v1",
             approval_status=ApprovalStatus.APPROVED,
         )
     )
 
 
-def test_citation_graph_projection_persists_edges_and_returns_neighbors(tmp_path) -> None:
+def test_citation_graph_projection_persists_edges_and_returns_neighbors(
+    tmp_path,
+    ensure_source_registry,
+) -> None:
     database_url = f"sqlite+pysqlite:///{tmp_path / 'citation_graph.db'}"
     engine = build_engine(database_url)
     Base.metadata.create_all(engine)
 
     with Session(engine) as session:
+        ensure_source_registry(session, "supreme_court")
         _seed_judgment(
             session,
             doc_id="doc-maneka-1978",

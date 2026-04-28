@@ -7,7 +7,16 @@ from alembic import command
 from alembic.config import Config
 from app.db.session import build_engine
 from app.ingestion import QdrantCollectionManager
-from app.models import VectorStoreBackend, VectorStoreCollection, VectorStorePoint
+from app.models import (
+    ApprovalStatus,
+    DocumentChunk,
+    LegalDocument,
+    LegalDocumentType,
+    ValidityStatus,
+    VectorStoreBackend,
+    VectorStoreCollection,
+    VectorStorePoint,
+)
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -40,6 +49,54 @@ def _point(
         vector=[0.1] * 12,
         payload=payload,
         is_active=True,
+    )
+
+
+def _seed_doc_and_chunk(session: Session, *, doc_id: str, chunk_id: str) -> None:
+    session.add(
+        LegalDocument(
+            doc_id=doc_id,
+            doc_type=LegalDocumentType.JUDGMENT,
+            court="Test Court",
+            bench=[],
+            parties={},
+            jurisdiction_binding=["All India"],
+            jurisdiction_persuasive=[],
+            current_validity=ValidityStatus.GOOD_LAW,
+            distinguished_by=[],
+            followed_by=[],
+            statutes_interpreted=[],
+            statutes_applied=[],
+            citations_made=[],
+            headnotes=[],
+            obiter_dicta=[],
+            practice_areas=[],
+            language="en",
+            full_text="fixture",
+            source_system=None,
+            parser_version="seed-v1",
+            approval_status=ApprovalStatus.APPROVED,
+            chunks=[
+                DocumentChunk(
+                    chunk_id=chunk_id,
+                    doc_type=LegalDocumentType.JUDGMENT,
+                    text="fixture chunk",
+                    text_normalized="fixture chunk",
+                    chunk_index=0,
+                    total_chunks=1,
+                    section_header=None,
+                    court="Test Court",
+                    date=None,
+                    citation=None,
+                    jurisdiction_binding=["All India"],
+                    jurisdiction_persuasive=[],
+                    current_validity=ValidityStatus.GOOD_LAW,
+                    practice_area=[],
+                    embedding_id=None,
+                    embedding_model=None,
+                )
+            ],
+        )
     )
 
 
@@ -78,6 +135,10 @@ def test_qdrant_collection_filters_support_validity_date_jurisdiction_and_bench_
 
     with Session(engine) as session:
         manager.ensure_default_collections(session)
+
+        _seed_doc_and_chunk(session, doc_id="doc-sc-1", chunk_id="chunk-sc-1")
+        _seed_doc_and_chunk(session, doc_id="doc-sc-2", chunk_id="chunk-sc-2")
+
         session.add_all(
             [
                 _point(
@@ -141,6 +202,11 @@ def test_qdrant_collection_filters_support_act_section_and_doctrine_fields(tmp_p
 
     with Session(engine) as session:
         manager.ensure_default_collections(session)
+
+        _seed_doc_and_chunk(session, doc_id="doc-st-1", chunk_id="chunk-st-1")
+        _seed_doc_and_chunk(session, doc_id="doc-st-2", chunk_id="chunk-st-2")
+        _seed_doc_and_chunk(session, doc_id="doc-doc-1", chunk_id="chunk-doc-1")
+
         session.add_all(
             [
                 _point(

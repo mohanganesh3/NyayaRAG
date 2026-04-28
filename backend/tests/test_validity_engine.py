@@ -50,7 +50,7 @@ def _seed_statute_fixture(session: Session) -> tuple[str, str]:
         practice_areas=["criminal"],
         language="en",
         full_text="Section 302 of the IPC.",
-        source_system="indiacode.nic.in",
+        source_system=None,
         parser_version="seed-v1",
         approval_status=ApprovalStatus.APPROVED,
         chunks=[
@@ -125,7 +125,7 @@ def _seed_statute_fixture(session: Session) -> tuple[str, str]:
         practice_areas=["criminal"],
         language="en",
         full_text="Interpretation of Section 302 IPC.",
-        source_system="supremecourt.gov.in",
+        source_system=None,
         parser_version="seed-v1",
         approval_status=ApprovalStatus.APPROVED,
         chunks=[
@@ -183,7 +183,7 @@ def _seed_overrule_fixture(session: Session) -> tuple[str, str, str]:
         practice_areas=["constitutional"],
         language="en",
         full_text="Original constitutional position.",
-        source_system="supremecourt.gov.in",
+        source_system=None,
         parser_version="seed-v1",
         approval_status=ApprovalStatus.APPROVED,
         chunks=[
@@ -230,7 +230,7 @@ def _seed_overrule_fixture(session: Session) -> tuple[str, str, str]:
         practice_areas=["constitutional"],
         language="en",
         full_text="Relied on the 2005 Supreme Court judgment.",
-        source_system="highcourt.nic.in",
+        source_system=None,
         parser_version="seed-v1",
         approval_status=ApprovalStatus.APPROVED,
         chunks=[
@@ -277,7 +277,7 @@ def _seed_overrule_fixture(session: Session) -> tuple[str, str, str]:
         practice_areas=["constitutional"],
         language="en",
         full_text="Overruling judgment.",
-        source_system="supremecourt.gov.in",
+        source_system=None,
         parser_version="seed-v1",
         approval_status=ApprovalStatus.APPROVED,
     )

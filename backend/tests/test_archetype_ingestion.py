@@ -9,10 +9,13 @@ from app.ingestion.adapters import (
     CriminalCodeStatuteAdapter,
     HighCourtHtmlAdapter,
     IndiaCodeActAdapter,
+    LawCommissionReportTextAdapter,
+    PdfLegalDocumentAdapter,
     SupremeCourtHtmlAdapter,
     TribunalOrderHtmlAdapter,
 )
 from app.models import (
+    ArtifactProvenance,
     IngestionRun,
     IngestionRunStatus,
     LegalDocument,
@@ -103,6 +106,24 @@ TRIBUNAL_SAMPLE = """
 </html>
 """
 
+LAW_COMMISSION_SAMPLE = """
+LAW COMMISSION OF INDIA
+
+Report No. 280
+Reform of the Evidence Act
+
+The Commission recommends clarifying the admissibility standard.
+
+Chapter 1
+This report addresses gaps in the current regime.
+"""
+
+PDF_TEXT_SAMPLE = """\
+Constituent Assembly Debate (Sample)
+
+We move that the draft be considered.
+"""
+
 
 @pytest.mark.parametrize(
     ("adapter", "context", "expected_doc_type", "expects_statute"),
@@ -148,7 +169,7 @@ TRIBUNAL_SAMPLE = """
             IngestionJobContext(
                 source_key="supreme_court",
                 source_url="https://www.sci.gov.in/judgment/puttaswamy",
-                parser_version="supreme-court-html-v1",
+                parser_version="supreme-court-sci-free-text-v1",
                 external_id="puttaswamy-2017",
                 inline_payload=SUPREME_COURT_SAMPLE,
             ),
@@ -181,6 +202,59 @@ TRIBUNAL_SAMPLE = """
             LegalDocumentType.ORDER,
             False,
         ),
+        (
+            LawCommissionReportTextAdapter(),
+            IngestionJobContext(
+                source_key="law_commission_reports",
+                source_url="https://lawcommissionofindia.nic.in/report_280/",
+                parser_version="law-commission-report-text-v1",
+                external_id="lc-report-280",
+                inline_payload=LAW_COMMISSION_SAMPLE,
+                metadata={
+                    "report_number": "280",
+                    "report_title": "Reform of the Evidence Act",
+                    "submission_date": "2018",
+                },
+            ),
+            LegalDocumentType.LC_REPORT,
+            False,
+        ),
+        (
+            PdfLegalDocumentAdapter(),
+            IngestionJobContext(
+                source_key="ca_debates",
+                source_url="https://eparlib.sansad.in/handle/123456789/762939?view_type=browse",
+                parser_version="cab-debate-pdf-v1",
+                external_id="ca-draft_making-762939",
+                inline_payload=PDF_TEXT_SAMPLE,
+                metadata={
+                    "doc_type": "cab_debate",
+                    "court_name": "Constituent Assembly of India",
+                    "practice_areas": ["constitutional"],
+                    "date_text": "1947-08-22",
+                },
+            ),
+            LegalDocumentType.CAB_DEBATE,
+            False,
+        ),
+        (
+            PdfLegalDocumentAdapter(),
+            IngestionJobContext(
+                source_key="law_commission_reports_pdf",
+                source_url="https://lawcommissionofindia.nic.in/report_280/",
+                parser_version="cab-debate-pdf-v1",
+                external_id="lc-report-280-pdf-sample",
+                inline_payload=PDF_TEXT_SAMPLE,
+                metadata={
+                    "doc_type": "lc_report",
+                    "court_name": "Law Commission of India",
+                    "practice_areas": ["statutory"],
+                    "date_text": "2018-01-01",
+                },
+            ),
+            LegalDocumentType.LC_REPORT,
+            False,
+        ),
     ],
 )
 def test_archetype_source_ingestion_persists_into_canonical_db(
@@ -202,8 +276,13 @@ def test_archetype_source_ingestion_persists_into_canonical_db(
         assert legal_document is not None
         assert legal_document.doc_type is expected_doc_type
         assert legal_document.source_system == context.source_key
+        assert legal_document.title is not None
+        assert legal_document.date_text is not None
         assert legal_document.source_url == context.source_url
         assert legal_document.source_document_ref == context.external_id
+        assert legal_document.collector_run_id == persisted.ingestion_run_id
+        assert legal_document.artifact_url == context.source_url
+        assert legal_document.provenance_tier == "official"
         assert legal_document.checksum is not None
         assert legal_document.parser_version == context.parser_version
         assert legal_document.ingestion_run_id == persisted.ingestion_run_id
@@ -218,6 +297,14 @@ def test_archetype_source_ingestion_persists_into_canonical_db(
         assert ingestion_run.source_key == context.source_key
         assert ingestion_run.status is IngestionRunStatus.SUCCEEDED
         assert ingestion_run.document_count == 1
+
+        provenance_rows = (
+            session.query(ArtifactProvenance)
+            .filter(ArtifactProvenance.doc_id == persisted.doc_id)
+            .all()
+        )
+        assert len(provenance_rows) == 1
+        assert provenance_rows[0].canonical_url == context.source_url
 
         if expects_statute:
             assert legal_document.statute_document is not None
