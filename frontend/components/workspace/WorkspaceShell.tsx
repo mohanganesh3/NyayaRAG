@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
-import { BootstrapQueryConsole } from "../research/BootstrapQueryConsole";
+import { Omnibox } from "./Omnibox";
 import { createInitialQueryStreamState } from "../../lib/query-stream";
 import type { FrontendAuthSession } from "../../lib/auth-session";
 import type { WorkspaceQueryHistoryPreview } from "../../lib/query-history";
@@ -864,14 +864,8 @@ export function WorkspaceShell({
           </div>
         </SurfaceCard>
 
-        <BootstrapQueryConsole
-          buttonLabel="Start Research"
+        <Omnibox
           defaultQuery={defaultWorkspaceQuery}
-          description="Submit a live query from the workspace and watch ordered backend steps resolve into an answer stream. The same SSE contract now powers the actual center lane."
-          heading="Live process display for workspace research."
-          sectionLabel="Live research display"
-          showContractNotes={false}
-          showQueryInput
           suggestedQueries={suggestedQueries}
           workspaceId={workspaceContext.case_id}
           onQuerySubmitted={setLastSubmittedQuery}
