@@ -11,6 +11,9 @@ This file is the durable operating memory for future Codex sessions. It preserve
 - the phased execution order,
 - and the non-negotiables that must never be optimized away.
 
+Corpus planning rule:
+- for any serious ingestion or corpus-expansion work, also read `NYAYARAG_COLLECTION_MASTER_STRATEGY.md`.
+
 ## 1. Product Thesis
 
 NyayaRAG is not a generic legal chatbot.

@@ -1,0 +1,16 @@
+storage:
+  storage_path: /qdrant/storage
+
+service:
+  http_port: 6333
+  grpc_port: 6334
+  max_request_size_mb: 256
+
+optimizers:
+  default_segment_number: 4
+  memmap_threshold_kb: 20000
+
+hnsw_index:
+  m: 16
+  ef_construct: 100
+  full_scan_threshold: 10000

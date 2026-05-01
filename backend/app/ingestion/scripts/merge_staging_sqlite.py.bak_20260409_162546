@@ -1,0 +1,356 @@
+from __future__ import annotations
+
+import argparse
+import os
+import sqlite3
+from dataclasses import dataclass
+from pathlib import Path
+import time
+
+
+@dataclass(frozen=True)
+class TablePlan:
+    name: str
+
+
+TABLES: list[TablePlan] = [
+    TablePlan("source_registries"),
+    TablePlan("ingestion_runs"),
+    TablePlan("legal_documents"),
+    TablePlan("document_chunks"),
+]
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="merge_staging_sqlite",
+        description=(
+            "Merge per-court staging SQLite DBs into a live SQLite corpus DB. "
+            "Per-table merge uses INSERT OR IGNORE to avoid PK/unique collisions."
+        ),
+    )
+    parser.add_argument(
+        "--live-db",
+        type=Path,
+        required=True,
+        help="Path to the live SQLite DB file (e.g. data/collection/corpus.db)",
+    )
+    parser.add_argument(
+        "--staging-dir",
+        type=Path,
+        required=True,
+        help="Directory containing staging *.db files.",
+    )
+    parser.add_argument(
+        "--glob",
+        type=str,
+        default="*.db",
+        help="Glob for selecting staging DBs (default: *.db).",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Do not modify live DB; only report what would be merged.",
+    )
+    parser.add_argument(
+        "--document-chunks-batch-rows",
+        type=int,
+        default=50_000,
+        help=(
+            "Merge document_chunks in rowid-range batches of this size, committing between batches. "
+            "Set to 0 to disable batching. (default: 50000)"
+        ),
+    )
+    parser.add_argument(
+        "--fail-on-locked",
+        action="store_true",
+        help=(
+            "Fail (instead of skipping) if a staging DB is locked. "
+            "Default behavior is to skip locked staging DBs so scheduled merges don't hang."
+        ),
+    )
+    parser.add_argument(
+        "--state-path",
+        type=Path,
+        default=None,
+        help=(
+            "Optional path to a text file tracking staging DB filenames already merged successfully. "
+            "If provided, the merge will skip any staging DB whose filename is listed, and will append "
+            "newly completed DBs as it goes. Useful for resuming long merges."
+        ),
+    )
+    parser.add_argument(
+        "--checkpoint-every-db",
+        action="store_true",
+        help=(
+            "Run a WAL checkpoint (PASSIVE) after each staging DB is merged to keep the WAL from growing too large."
+        ),
+    )
+    return parser
+
+
+def _table_exists(conn: sqlite3.Connection, schema: str, table: str) -> bool:
+    row = conn.execute(
+        f"SELECT 1 FROM {schema}.sqlite_master WHERE type='table' AND name=? LIMIT 1",
+        (table,),
+    ).fetchone()
+    return row is not None
+
+
+def _columns(conn: sqlite3.Connection, schema: str, table: str) -> list[str]:
+    cols: list[str] = []
+    for row in conn.execute(f"PRAGMA {schema}.table_info({table})"):
+        # row = (cid, name, type, notnull, dflt_value, pk)
+        cols.append(str(row[1]))
+    return cols
+
+
+def _mergeable_columns(
+    conn: sqlite3.Connection,
+    table: str,
+) -> list[str]:
+    stg_cols = _columns(conn, "stg", table)
+    main_cols = _columns(conn, "main", table)
+
+    missing_in_staging = [col for col in main_cols if col not in stg_cols]
+    if missing_in_staging:
+        raise RuntimeError(
+            f"Schema mismatch for table '{table}'.\n"
+            f"live columns: {main_cols}\n"
+            f"staging columns: {stg_cols}\n"
+            f"missing in staging: {missing_in_staging}"
+        )
+
+    return [col for col in main_cols if col in stg_cols]
+
+
+def _merge_table(conn: sqlite3.Connection, table: str) -> int:
+    if not _table_exists(conn, "stg", table):
+        return 0
+
+    if not _table_exists(conn, "main", table):
+        raise RuntimeError(f"Live DB is missing expected table: {table}")
+
+    merge_cols = _mergeable_columns(conn, table)
+    col_list = ", ".join(merge_cols)
+    if table == "legal_documents" and "checksum" in merge_cols:
+        sql = (
+            f"INSERT OR IGNORE INTO main.{table} ({col_list}) "
+            f"SELECT {col_list} FROM stg.{table} AS s "
+            "WHERE s.checksum IS NULL OR NOT EXISTS ("
+            "SELECT 1 FROM main.legal_documents AS m "
+            "WHERE m.checksum = s.checksum AND m.checksum IS NOT NULL)"
+        )
+    elif table == "document_chunks" and "doc_id" in merge_cols:
+        # Avoid inserting orphan chunks when legal_documents were de-duplicated by checksum.
+        sql = (
+            f"INSERT OR IGNORE INTO main.{table} ({col_list}) "
+            f"SELECT {col_list} FROM stg.{table} AS s "
+            "WHERE EXISTS (SELECT 1 FROM main.legal_documents AS m WHERE m.doc_id = s.doc_id)"
+        )
+    else:
+        sql = (
+            f"INSERT OR IGNORE INTO main.{table} ({col_list}) "
+            f"SELECT {col_list} FROM stg.{table}"
+        )
+    conn.execute(sql)
+    changes = int(conn.execute("SELECT changes()").fetchone()[0])
+    return changes
+
+
+def _merge_table_batched_by_rowid(conn: sqlite3.Connection, table: str, *, batch_rows: int) -> int:
+    """Merge a large table using rowid-range batches.
+
+    This keeps write transactions short and reduces lock contention on the live DB.
+    """
+
+    if batch_rows <= 0:
+        return _merge_table(conn, table)
+
+    if not _table_exists(conn, "stg", table):
+        return 0
+    if not _table_exists(conn, "main", table):
+        raise RuntimeError(f"Live DB is missing expected table: {table}")
+
+    merge_cols = _mergeable_columns(conn, table)
+    max_rowid = conn.execute(f"SELECT MAX(rowid) FROM stg.{table}").fetchone()[0]
+    if max_rowid is None:
+        return 0
+
+    col_list = ", ".join(merge_cols)
+    if table == "legal_documents" and "checksum" in merge_cols:
+        sql = (
+            f"INSERT OR IGNORE INTO main.{table} ({col_list}) "
+            f"SELECT {col_list} FROM stg.{table} AS s WHERE rowid BETWEEN ? AND ? "
+            "AND (s.checksum IS NULL OR NOT EXISTS ("
+            "SELECT 1 FROM main.legal_documents AS m "
+            "WHERE m.checksum = s.checksum AND m.checksum IS NOT NULL))"
+        )
+    elif table == "document_chunks" and "doc_id" in merge_cols:
+        # Avoid inserting orphan chunks when legal_documents were de-duplicated by checksum.
+        sql = (
+            f"INSERT OR IGNORE INTO main.{table} ({col_list}) "
+            f"SELECT {col_list} FROM stg.{table} AS s WHERE rowid BETWEEN ? AND ? "
+            "AND EXISTS (SELECT 1 FROM main.legal_documents AS m WHERE m.doc_id = s.doc_id)"
+        )
+    else:
+        sql = (
+            f"INSERT OR IGNORE INTO main.{table} ({col_list}) "
+            f"SELECT {col_list} FROM stg.{table} WHERE rowid BETWEEN ? AND ?"
+        )
+
+    total_changes = 0
+    lo = 1
+    max_rowid = int(max_rowid)
+    while lo <= max_rowid:
+        hi = min(lo + batch_rows - 1, max_rowid)
+        conn.execute(sql, (lo, hi))
+        total_changes += int(conn.execute("SELECT changes()").fetchone()[0])
+        lo = hi + 1
+
+    return total_changes
+
+
+def _load_state(path: Path) -> set[str]:
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return set()
+    return {line.strip() for line in raw.splitlines() if line.strip()}
+
+
+def _append_state(path: Path, db_name: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as f:
+        f.write(db_name + "\n")
+        f.flush()
+        os.fsync(f.fileno())
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    live_db: Path = args.live_db
+    staging_dir: Path = args.staging_dir
+
+    if not live_db.exists():
+        raise SystemExit(f"Live DB not found: {live_db}")
+    if not staging_dir.exists():
+        raise SystemExit(f"Staging dir not found: {staging_dir}")
+
+    staging_dbs = [p for p in sorted(staging_dir.glob(args.glob)) if p.is_file()]
+    if not staging_dbs:
+        print("No staging DBs matched.")
+        return 0
+
+    state_path: Path | None = args.state_path
+    merged_state: set[str] = _load_state(state_path) if state_path is not None else set()
+    if state_path is not None and merged_state:
+        print(f"Loaded {len(merged_state):,} already-merged staging DBs from: {state_path}")
+
+    # Use a short timeout; we prefer skipping/retrying later to hanging the merge loop.
+    conn = sqlite3.connect(live_db, timeout=2.0)
+    try:
+        conn.execute("PRAGMA foreign_keys = ON")
+        conn.execute("PRAGMA busy_timeout = 2000")
+
+        total_changes: dict[str, int] = {t.name: 0 for t in TABLES}
+
+        for stg_path in staging_dbs:
+            if state_path is not None and stg_path.name in merged_state:
+                print(f"Skipping already merged: {stg_path.name}")
+                continue
+
+            print(f"Merging staging DB: {stg_path.name}")
+
+            conn.execute("DETACH DATABASE stg") if _can_detach(conn) else None
+            try:
+                conn.execute("ATTACH DATABASE ? AS stg", (str(stg_path),))
+            except sqlite3.OperationalError as exc:
+                msg = str(exc).lower()
+                if "locked" in msg and not args.fail_on_locked:
+                    print(f"  skipping (locked): {stg_path.name}")
+                    continue
+                raise
+
+            # We never issue write statements against the attached staging DB.
+            # Avoid schema-qualified query_only here because SQLite treats the
+            # connection as read-only for subsequent BEGIN IMMEDIATE calls.
+
+            if args.dry_run:
+                for t in TABLES:
+                    if _table_exists(conn, "stg", t.name):
+                        count = int(
+                            conn.execute(f"SELECT COUNT(*) FROM stg.{t.name}").fetchone()[0]
+                        )
+                        print(f"  would scan {t.name}: {count:,} rows")
+                conn.execute("DETACH DATABASE stg")
+                continue
+
+            # Acquire write lock per table (and per batch for very large tables)
+            # to keep transactions short and reduce the chance of locking up long-running collectors.
+            try:
+                for t in TABLES:
+                    begin_attempts = 5
+                    for attempt in range(1, begin_attempts + 1):
+                        try:
+                            conn.execute("BEGIN IMMEDIATE")
+                            break
+                        except sqlite3.OperationalError as exc:
+                            msg = str(exc).lower()
+                            if "locked" in msg and attempt < begin_attempts:
+                                sleep_s = min(2 ** (attempt - 1), 10)
+                                print(
+                                    f"  live DB busy; retrying begin in {sleep_s}s (attempt {attempt}/{begin_attempts})"
+                                )
+                                time.sleep(sleep_s)
+                                continue
+                            raise
+
+                    try:
+                        if t.name == "document_chunks":
+                            changes = _merge_table_batched_by_rowid(
+                                conn,
+                                t.name,
+                                batch_rows=int(args.document_chunks_batch_rows),
+                            )
+                        else:
+                            changes = _merge_table(conn, t.name)
+
+                        total_changes[t.name] += changes
+                        if changes:
+                            print(f"  merged {t.name}: +{changes:,}")
+                        conn.execute("COMMIT")
+                    except Exception:
+                        conn.execute("ROLLBACK")
+                        raise
+            finally:
+                conn.execute("DETACH DATABASE stg")
+
+            if state_path is not None:
+                _append_state(state_path, stg_path.name)
+                merged_state.add(stg_path.name)
+
+            if args.checkpoint_every_db:
+                conn.execute("PRAGMA wal_checkpoint(PASSIVE)")
+
+        print("\nMerge summary (rows inserted):")
+        for t in TABLES:
+            print(f"  {t.name}: {total_changes[t.name]:,}")
+
+    finally:
+        conn.close()
+
+    return 0
+
+
+def _can_detach(conn: sqlite3.Connection) -> bool:
+    # Defensive: DETACH fails if not attached.
+    try:
+        rows = conn.execute("PRAGMA database_list").fetchall()
+        return any(r[1] == "stg" for r in rows)
+    except sqlite3.Error:
+        return False
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

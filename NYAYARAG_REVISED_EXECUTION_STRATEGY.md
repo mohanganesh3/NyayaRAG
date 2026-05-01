@@ -172,6 +172,12 @@ This is the point where we can measure whether the architecture is actually doin
 
 ### Stage C: Only then begin bulk corpus ingestion fan-out
 
+Before the fan-out is considered real, enforce one additional gate:
+- collectors must prove row-count growth after restart, not just process liveness,
+- duplicate URLs must be skipped so replayed documents do not fake progress,
+- hostile portals must graduate from generic seed crawls to dedicated adapters when needed,
+- metadata completeness is part of corpus quality, not a later cleanup task.
+
 After Stage A and Stage B, scale ingestion from archetypes to real corpus breadth:
 - Supreme Court full runs
 - High Court fan-out
@@ -334,4 +340,3 @@ If a future session asks:
 the answer is:
 
 `Because NyayaRAG wins on verified legal trust, not on raw retrieval volume or UI speed.`
-

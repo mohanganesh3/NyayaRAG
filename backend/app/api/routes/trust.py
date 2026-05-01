@@ -37,3 +37,23 @@ def get_public_trust_snapshot(db: DbSession) -> PublicTrustResponse:
             payload=run.payload,
         )
     )
+@router.get("/trust/scorecard")
+def get_eval_scorecard():
+    """Returns the latest NyayaEval scorecard."""
+    import os
+    import json
+    report_path = "nyaya_eval_report.json"
+    if not os.path.exists(report_path):
+        return {
+            "status": "pending",
+            "message": "Evaluation report not found. Please run the evaluation suite."
+        }
+        
+    with open(report_path, "r") as f:
+        data = json.load(f)
+        
+    return {
+        "status": "completed",
+        "overall": data.get("overall"),
+        "by_category": {cat: len(results) for cat, results in data.get("by_category", {}).items()}
+    }

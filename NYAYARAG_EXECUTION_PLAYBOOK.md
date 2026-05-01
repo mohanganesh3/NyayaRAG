@@ -14,10 +14,11 @@ This file is the execution-grade companion to the master memory. It is meant to 
 At the start of each serious build session:
 1. Read `NYAYARAG_MASTER_MEMORY.md`.
 2. Read this file.
-3. Pick one exact phase and one exact unit.
-4. Build only that unit plus any required supporting code.
-5. Run the unit tests and phase gate.
-6. Do not move forward until the gate passes.
+3. If the active work touches corpus scope, source adapters, or ingestion rollout, read `NYAYARAG_COLLECTION_MASTER_STRATEGY.md`.
+4. Pick one exact phase and one exact unit.
+5. Build only that unit plus any required supporting code.
+6. Run the unit tests and phase gate.
+7. Do not move forward until the gate passes.
 
 Session prompt discipline:
 - always state the active phase,
@@ -283,6 +284,48 @@ Implement:
 
 Exit check:
 - seeded repeal/amendment/overrule fixtures update derived state correctly.
+
+### Unit 2.6: Bulk collection reliability and metadata completeness
+
+Goal:
+- make corpus fan-out operationally trustworthy before calling any source "done".
+
+Hard requirements:
+- a collector is not considered healthy because a `screen` session exists,
+- every restarted collector must be checked again after 10 minutes using a real row-count delta,
+- row-count growth is the truth signal, not log lines alone,
+- generic crawlers must skip already-ingested `source_url` values so repeated URLs do not masquerade as progress,
+- XHR-first listings, session-bound downloads, sitemap-only pages, and JS/captcha search portals must be treated as separate collection archetypes,
+- if a source repeatedly underfills, replace the generic seed crawl with a dedicated adapter instead of endlessly restarting it.
+
+Edge cases that must be explicitly handled in plan and code:
+- duplicate re-ingest trap: logs can say "ingested" while DB count stays flat if the same documents are being revisited,
+- hidden pagination trap: some sources expose total pages only in the first AJAX response,
+- session-bound download trap: some PDF URLs work only with the exact listing/detail-page context,
+- captcha/search trap: some portals expose the real corpus only through search flows, so notice-board or home-page seeds are not a substitute,
+- sitemap/feed fallback: when public search is hostile, test `sitemap.xml`, RSS, XML feeds, and file directories,
+- metadata drift trap: collecting raw PDF text without structured provenance is not enough for the final corpus.
+
+Minimum metadata for every collected document:
+- `source_url`
+- `source_document_ref`
+- `court` or regulator/tribunal name
+- `doc_type`
+- `date_text` or structured date when available
+- `title` when the listing/detail page exposes it
+- `seed_url`
+- `detail_url` when applicable
+- listing mode or listing page index when applicable
+- `jurisdiction_binding`
+- `practice_areas`
+- `parser_version`
+- `collected_at`
+
+Exit check:
+- the audit shows every source at `DONE` or 100%,
+- every non-done source has a verified positive row-count delta after restart,
+- no source is allowed to remain in a "running but flat" state without a logged root-cause investigation,
+- sampled records from each collector retain structured provenance and source metadata, not only PDF body text.
 
 ## 8. Phase 3: Chunking, Indexing, and Retrieval Stores
 
